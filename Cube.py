@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 from typing import Union
 from scipy import linalg
 from sklearn.utils.extmath import svd_flip
+from tools import compute_symmpad_3d,  get_g_mean, aliasing
 """
 @author: Lina Issa 
 
@@ -58,7 +59,7 @@ class Cube(ABC): #si heritage mettre le nom de l heritage ceci est une classe ab
         def preprocess(self, *args, **kwargs):
             return
         @abstractmethod
-        def loading_data(self, data: str):
+        def loading_datacubes(self, data: str):
             return
 
 
@@ -66,7 +67,7 @@ class CubeHyperSpectral(Cube):
     def __init__(self,data:np.array, mask: np.array =None, **kwargs) -> None:
         super().__init__(data, mask, **kwargs)
 
-    def loading_data(self, dataHS: str) -> np.array:
+    def loading_datacubes(self, dataHS: str) -> np.array:
     """
     Fetching the datacubes files from the given path
 
@@ -76,84 +77,127 @@ class CubeHyperSpectral(Cube):
    
     """
         YnirSpec = fits.getdata(HyperSpectral_Image)
-        return
+        return YnirSpec
 
     @staticmethod
-    def downsizing(YnirSpec: np.array, d: int, m: int, n : int, *args, **kwargs) -> np.array :
+    def downsizing(YnirSpec: np.array, d: int, x_ms: int, y_ms : int, *args, **kwargs) -> np.array :
         """
        : param YnirSpec: the hyperspectral image 
        : param d : the downsizing factor given in the config file
-       : param m : first  spatial dimension of the Multispectral image
-       : param n : second spatial dimension of the Multispectral image
+       : param x_ms : first  spatial dimension of the Multispectral image
+       : param y_ms : second spatial dimension of the Multispectral image
        : returns: downsized np.array
        
        """
-        YnirSpec = resize(YnirSpec, (YnirSpec.shape[0],m//d, n//d),order=3, mode='symmetric')*(d**2*FLUXCONV_NC)
+        YnirSpec = resize(YnirSpec, (YnirSpec.shape[0],x_ms//d, y_ms//d),order=3, mode='symmetric')*(d**2*FLUXCONV_NC)
         return YnirSpec
 
-    def PCA_projection(self, YnirSpec: np.array,YnirCam: np.array, Lh: np.array, lacp: int ) -> Union[np.array, np.array, np.array]:
+    def initialisation_HS(self, YnirSpec: np.array, YnirCam: np.array, Lh: np.array, lacp: int, fact_pad: int) -> Union[np.array, np.array, np.array]:
         """
        : param YnirSpec: the hyperspectral image
        : param YnirCam : the multispectral image
        : param Lh      : the spectral operator retrieved from LH.fits
        : param lacp    : number of dimension for the reduced spectral space.
-       : returns       : V - the PCA projection matrix, Z - the retroprojected datacube, mean - the centered data
+       : param fact_pad: padding factor from the config file
+       : returns       : V - the PCA projection matrix, Z - the datacube prepared for the initialisation, mean - the centered data
 
        """
         print(' PCA on the HS image : ')
         #############################################
-        #               Depliage de YnirSpec
+        #              Flattening  YnirSpec
         #############################################
 
-        l, m, n = YnirSpec.shape
-        X = np.reshape(np.dot(np.diag(Lh**-1), np.reshape(Yns, (l, m*n))), (l, m, n))
+        z, x_H, y_H = YnirSpec.shape
+        x_M, y_M    = YnirCam.shape[1],  YnirCam.shape[2]
+        X           = np.reshape(np.dot(np.diag(Lh**-1), np.reshape(Yns, (z, x_H*y_H))), (z, x_H, y_H))
 
         #############################################
-        #               PCA Projection
+        #              PCA projection of  Z
         #############################################
+
+        V, Z, mean = self._pca_projection(X, lacp)
+
+        #############################################
+        #              Retroprojection of  Z
+        #############################################
+
+        Z = np.reshape(Z.T, (lacp, x_H, y_H))
+
+        #############################################
+        #              Upsampling and FFT of  Z
+        #############################################
+
+        Z    = self._upsampling(Z, x_M, y_M)
+        Z    = compute_symmpad_3d(Z,fact_pad)  # applies symmetric padding to the datacube with the help of tools.compute_symmpad_3d
+        Z    = np.fft.fft2(Z, norm='ortho')    # applies symmetric boundaries condtions to the upsampled hyperspectral datacubes
+
+        mean = self._meanSpectrumFourier(X_mean, Z)
+
+        return V, Z, mean
+
+    @staticmethod
+    def _pca_projection(X: np.array, lacp: int ) ->  Union[np.array, np.array, np.array]:
+        """
+        Performs a PCA decomposition on the hyperspectral image in order to retrieve the matrixes V, Z and mean.
+        The PCA is applied for preprocessing the hyperspectral datacubes.
+        :param X   : the flattenned hyperspectral datacubes
+        :param lacp:  number of dimension for the reduced spectral space.
+        :return    :  V - the PCA projection matrix, Z- the projected cube,  mean - the centered data
+        """
+
+    #############################################
+    #               PCA Projection
+    #############################################
 
         X_mean = np.mean(X.T, axis=0)
-        X-=X_mean
+        X -= X_mean
         U, S, V = linalg.svd(X.T, full_matrices=False)
         U, V = svd_flip(U, V)
         S = S[:lacp]
 
-        #############################################
-        #               PCA Decomposition
-        #############################################
 
-        Z = U[:, :nb_comp] * (S ** (1 / 2))
-        V = np.dot(np.diag(S ** (1 / 2)), V[:nb_comp])
+    #############################################
+    #               PCA Decomposition
+    #############################################
 
-        #############################################
-        #              Retroprojection du cube  Z
-        #############################################
-
-        Z = np.reshape(Z.T, (lacp, m, n))
-
-        #############################################
-        #              Upsampling du cube  Z
-        #############################################
-
-        Z    = self._upsampling(Z, m, n)
-        mean = self._meanSpectrumFourier(X_mean, Z)
+        Z = U[:, :lacp] * (S ** (1 / 2))
+        V = np.dot(np.diag(S ** (1 / 2)), V[:lacp])
 
         return V.T, Z, mean
 
-
     @staticmethod
-    def  _upsampling(Z: np.array, m: int, n: int)-> np.array:
+    def  _upsampling(Z: np.array, x_M: int, y_M: int)-> np.array:
         """
         Performs a bi-cubic interpolation under symmetric boundaries conditions
-        : param Z: the PCA retroprojected datacube
-        : param m : first  spatial dimension of the Multispectral image
-        : param n : second spatial dimension of the Multispectral image
-        : returns : the resized and interpolated datacube Z_interpol
+        : param Z   : the PCA retroprojected datacube
+        : param x_M : first  spatial dimension of the Multispectral image
+        : param y_M : second spatial dimension of the Multispectral image
+        : returns   : the resized and interpolated datacube Z_interpol
         """
-        Z_resized = resize(Z, (n_comp, m, n), order=3, mode='symmetric')
-        Z_interpol = np.fft.fft2(tools.compute_symmpad_3d(Z_resized, fact_pad), norm='ortho')  # Symmetric boundaries conditions
-        return Z_interpol
+        Z_upsampled = resize(Z, (n_comp, x_M, y_M), order=3, mode='symmetric')
+        return Z_upsampled
 
+
+# not sure about about keeping these two ...
+#    @staticmethod
+#    def _padding(Z: np.array, fact_pad: int)-> np.array:
+#        """
+#        Applies symmetric padding to the datacube with the help of tools.compute_symmpad_3d
+#        :param Z_upsampled : upsampled hyperspectral datacubes
+#        :param fact_pad    : padding factor for image processing defined in the config file
+#        :return            : datacube with a symmetric padding
+#        """
+#        return compute_symmpad_3d(Z, fact_pad)
+#
+#    @staticmethod
+#    def _fft(Z_upsampled: np.array)-> np.array:
+#        """
+#        Applies symmetric boundaries condtions to the upsampled hyperspectral datacubes
+#        :param Z_upsampled : the upsampled hyperspectral datacubes with symmetric padding
+#        :return            : The FFT projection of the datacube Z
+#        """
+#        Z = np.fft.fft2(Z_upsampled, norm='ortho')
+#        return Z
 
     @staticmethod
     def _meanSpectrumFourier(X_mean, Z):
@@ -170,8 +214,35 @@ class CubeHyperSpectral(Cube):
         mean[:, 0] = X_mean * np.sqrt(N)
         return mean
 
-    def preprocess(self):
-        return
+    def preprocess(YnirSpec: np.array, YnirCam: np.array, Lh: np.array, mean: np.array, fact_pad: int, d: int) -> np.array :
+        """
+        Preprocessing for the hyperspectral image only. Needs the mean form the PCA decomposition.
+
+        :param YnirSpec: the hyperspectral image
+        :param YnirCam : the multispectral image
+        :param Lh: the spectral operator retrieved from LH.fits
+        :param mean: from the PCA projection on the hyperspectral datacubes
+        :return: the fusion-ready hyperspectral image
+        """
+        print(' Operators and data preprocessing : ')
+
+        z, x_H, y_H = YnirSpec.shape
+        x_M, y_M    = YnirCam.shape[1], YnirCam.shape[2]  # only used for the aliasing
+
+        #############################################
+        #               FFT on YnirSpec
+        #############################################
+
+        Yns = compute_symmpad_3d(YnirSpec,  fact_pad//d+1)
+        Yns = np.fft.fft2(Yns[:, :-2, :-2], axes=(1, 2), norm='ortho')
+
+        #############################################
+        #               Substracting the mean image
+        #############################################
+
+        mean[:, 0] = mean[:, 0] * get_g_mean() # Applying the NirSpec PSF to the mean
+        Yns        = np.reshape(Yns, (z, x_H * y_H)) - np.dot(np.diag(Lh), aliasing(mean_, (z, x_M, y_M)))
+        return Yns
 
 class CubeMultisSectral(Cube):
 
@@ -179,17 +250,41 @@ class CubeMultisSectral(Cube):
         super().__init__(data, mask, **kwargs) # appelle classe mere
         # truc supplementaires
 
-    def loading_data(self, dataMS: str) -> np.array :
+    def loading_datacubes(self, dataMS: str) -> np.array :
     """
-    : param dataHS: the path to the .fits multispectral image 
-    : type data: str
-    : return: np.array    
+    :param dataHS: the path to the .fits multispectral image
+    :type data: str
+    :return: np.array
 
     """
-    YnirCam  = fits.getdata(MultiSpectral_Image)
-    return
+        YnirCam  = fits.getdata(MultiSpectral_Image)
+        return YnirCam
 
-    def preprocess(self):
-        return
+    def preprocess(YnirCam: np.array, Lm: np.array, mean: np.array, fact_pad: int) -> np.array:
+        """
+        Performs preprocessing for the multispectral image. Needs the mean from the PCA decomposition performed on the hyperspectral image.
+        :param YnirCam : the multispectral image
+        :param Lm: the spectral operator retrieved from LM.fits
+        :param mean: from the PCA projection on the hyperspectral datacubes
+        :param fact_pad : padding factor
+        :return: the fusion-ready multispectral image
+        """
+        print(' Operators and data preprocessing : ')
+
+        z, x, y = YnirCam.shape
+
+        #############################################
+        #               FFT on YnirSpec
+        #############################################
+        Ync = compute_symmpad_3d(YnirCam,  fact_pad)
+        Ync = np.fft.fft2(Ync, axes=(1, 2), norm='ortho')
+
+        #############################################
+        #               Substracting the mean image
+        #############################################
+        mean[:, 0] = mean[:, 0] * get_h_mean() # Applying the NirSpec PSF to the mean
+        Ync = np.reshape(Ync, (z, x * y)) - np.dot(np.diag(Lm), mean)
+
+        return Ync
 #self = objet lui meme
 #cls renvoie a la classe,  pas de self en static
