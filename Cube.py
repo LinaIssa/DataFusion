@@ -1,153 +1,152 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 import numpy as np
 from skimage.transform import resize
 from abc import ABC, abstractmethod
-from typing import Union
+from typing import Union, Optional
 from scipy import linalg
 from sklearn.utils.extmath import svd_flip
-from tools import compute_symmpad_3d,  get_g_mean, aliasing
-"""
-@author: Lina Issa 
+from tools import compute_symmpad_3d,  get_g_mean, aliasing, get_h_mean
 
-We define here an abstract cube class that gathers all the pre-processing and post-processing methods used in the fusion framework. These methods apply to the hyperspectral and multispectral data cubes and are designed to be applied to JWST datacubes 
-"""
 class Cube(ABC): #si heritage mettre le nom de l heritage ceci est une classe abstraite
-    '''
-    Abstract class that contains the datacube and some fundamental operations
-    '''
+    """
+    @author: Lina Issa
+    We define here an abstract cube class that gathers all the pre-processing and post-processing methods used
+    in the fusion framework. These methods apply to the hyperspectral and multispectral data cubes
+    and are designed to be applied to JWST datacubes.Date must be loaded beforehand and be a numpy array type.
+    The expected shape is (l, x, y) where l corresponds to the spectral dimension and x,y the spatial ones.
+    """
 
-        def __init__(self, data:np.array, mask: np.array =None, **kwargs) -> None:
-            if not isinstance(data, np.array):
-                raise TypeError(f'data has type {type(data)} but it must be a numpy array ')
-            self.data = data
-            self.mask = mask
-            self.dim  = data.shape
+    def __init__(self, data: np.array, fact_pad : int, **kwargs) -> None:
 
-            # Flatten version of the data
-            self.dataflat = self.flatten(data)
+        if not isinstance(data, np.array):
+            raise TypeError(f'data has type {type(data)} but it must be a numpy array ')
 
-        @staticmethod
-        def flatten( data: np.array, *args, **kwargs) -> np.array:
-            r"""
-            .. codeauthor:: Lina Issa - IRAP <lina.issa@irap.omp.eu>
-            Transform a 3d array into a 2d flatten array
+        if not isinstance(fact_pad, int) :
+            raise TypeError(f'factor padding has type {type(fact_pad)} but it must be an integer ')
 
-            : param data: input data
-            :type data: numpy array
-            :return: flatten array
-            :rtype: np.array
-            """
-            x, y = np.arange(pix1), np.arange(pix2)
-            MX, MY = np.meshgrid(y, x)
-            X_cube = np.full((bands, pix1, pix2), np.nan)
-            if bands in X.shape:
+        self.data = data
 
-                if X.shape[0] == bands:
-                    for x, y, z in zip(MX[~mask], MY[~mask], range(X.shape[1])):
-                        X_cube[:, y, x] = X[:, z]
-                if X.shape[1] == bands:
-                    for x, y, z in zip(MX[~mask], MY[~mask], range(X.shape[0])):
-                        X_cube[:, y, x] = X[z, :]
-                return X_cube
-            else:
-                raise TypeError(
-                    f'The given number of bands {bands} is in conflict with the shape of the given data {X.shape[0], X.shape[1]}.')
+        self.dim  = data.shape
+        self.fact_pad = fact_pad
 
-        @abstractmethod
-        def postprocess(self, *args, **kwargs):
-            return
-        @abstractmethod
-        def preprocess(self, *args, **kwargs):
-            return
-        @abstractmethod
-        def loading_datacubes(self, data: str):
-            return
+    @abstractmethod
+    def preprocess(self, *args, **kwargs):
+        return
 
 
 class CubeHyperSpectral(Cube):
-    def __init__(self,data:np.array, mask: np.array =None, **kwargs) -> None:
-        super().__init__(data, mask, **kwargs)
-
-    def loading_datacubes(self, dataHS: str) -> np.array:
-    """
-    Fetching the datacubes files from the given path
-
-    : param dataHS: the path to the .fits hyperspectral image 
-    : type data: str
-    : return: np.array    
-   
-    """
-        YnirSpec = fits.getdata(HyperSpectral_Image)
-        return YnirSpec
-
-    @staticmethod
-    def downsizing(YnirSpec: np.array, d: int, x_ms: int, y_ms : int, *args, **kwargs) -> np.array :
+    def __init__(self, data : np.array, fact_pad : int,  downsampling : int, fluxConv : float, lacp : int = 10, **kwargs) -> None:
         """
-       : param YnirSpec: the hyperspectral image 
-       : param d : the downsizing factor given in the config file
-       : param x_ms : first  spatial dimension of the Multispectral image
-       : param y_ms : second spatial dimension of the Multispectral image
+
+        :param data: the hyperspectral image in a numpy array of shape (spectral dimension, spatial dimension 1, spatial dimenson 2)
+        :param fact_pad: a padding factor parameter from the configuration file
+        :param downsampling: a downsampling factor from the configuration file
+        :param fluxConv: a flux conversion parameter from the configuration file
+        :param lacp: the dimension of the reduced spectral space
+        :param kwargs: optional parameters
+        """
+
+        super().__init__(data, fact_pad)
+        self.lacp = self._checklacp(lacp)
+        self.d    = self._checkdownsampling(downsampling)
+        self.fluxConv = fluxConv
+        self.wave, self.x_hyper, self.y_hyper = self.dim[0],self.dim[1], self.dim[2]
+
+
+
+    def _checklacp(self, lacp : int) -> int:
+
+        if not isinstance(lacp, int):
+            raise TypeError(f'You provided a {type(lacp)} type instead of an integer for lacp.')
+
+        if lacp < 0 or lacp > self.dim[2]:
+            raise ValueError('lacp should be a positive integer and below the spectral dimension of the datacube.')
+
+        return lacp
+    def _checkdownsampling(self, downsampling : int) -> int:
+
+        if not isinstance(downsampling, int):
+            raise TypeError(f'You provided a {type(downsampling)} type instead of an integer for downsampling.')
+
+        if (2*self.fact_pad+2) % downsampling != 0  or (self.fact_pad//downsampling + 1)%2 != 0:
+            raise ValueError('The downsampling and the padding factors does not obey the following relations:  ('
+                             '2*fact_pad+2) % d = 0  and (fact_pad//d + 1)%2 =0 . See the docstring in '
+                             'create_ConfigFile.py for more information')
+
+        return downsampling
+
+
+
+
+    def downsizing(self, x_multi: int, y_multi : int, *args, **kwargs) -> np.array :
+        """
+       : param x_multi : first  spatial dimension of the Multispectral image
+       : param y_multi : second spatial dimension of the Multispectral image
        : returns: downsized np.array
        
        """
-        YnirSpec = resize(YnirSpec, (YnirSpec.shape[0],x_ms//d, y_ms//d),order=3, mode='symmetric')*(d**2*FLUXCONV_NC)
+        YnirSpec =self.data
+        YnirSpec = resize(YnirSpec, (self.wave,x_multi//self.d, y_multi//self.d),order=3, mode='symmetric')*(self.d**2*self.fluxConv)
+
         return YnirSpec
 
-    def initialisation_HS(self, YnirSpec: np.array, YnirCam: np.array, Lh: np.array, lacp: int, fact_pad: int) -> Union[np.array, np.array, np.array]:
+    def initialisation_HS(self, YnirCam: np.array, Lh: np.array) -> Union[np.array, np.array, np.array]:
         """
        : param YnirSpec: the hyperspectral image
        : param YnirCam : the multispectral image
        : param Lh      : the spectral operator retrieved from LH.fits
-       : param lacp    : number of dimension for the reduced spectral space.
-       : param fact_pad: padding factor from the config file
        : returns       : V - the PCA projection matrix, Z - the datacube prepared for the initialisation, mean - the centered data
 
        """
+
         print(' PCA on the HS image : ')
         #############################################
         #              Flattening  YnirSpec
         #############################################
-
-        z, x_H, y_H = YnirSpec.shape
-        x_M, y_M    = YnirCam.shape[1],  YnirCam.shape[2]
-        X           = np.reshape(np.dot(np.diag(Lh**-1), np.reshape(Yns, (z, x_H*y_H))), (z, x_H, y_H))
+        YnirSpec = self.data
+        x_multi, y_multi = YnirCam.shape[1],  YnirCam.shape[2]
+        X = np.reshape(np.dot(np.diag(Lh**-1), np.reshape(YnirSpec, (self.wave, self.x_hyper*self.y_hyper))), (self.wave, self.x_hyper, self.y_hyper))
 
         #############################################
         #              PCA projection of  Z
         #############################################
 
-        V, Z, mean = self._pca_projection(X, lacp)
+        V, Z, mean = self._pca_projection(X, self.lacp)
 
         #############################################
         #              Retroprojection of  Z
         #############################################
 
-        Z = np.reshape(Z.T, (lacp, x_H, y_H))
+        Z = np.reshape(Z.T, (self.lacp, self.x_hyper, self.y_hyper))
 
         #############################################
         #              Upsampling and FFT of  Z
         #############################################
 
-        Z    = self._upsampling(Z, x_M, y_M)
-        Z    = compute_symmpad_3d(Z,fact_pad)  # applies symmetric padding to the datacube with the help of tools.compute_symmpad_3d
-        Z    = np.fft.fft2(Z, norm='ortho')    # applies symmetric boundaries condtions to the upsampled hyperspectral datacubes
+        Z = self._upsampling(Z, x_multi, y_multi, self.lacp)
+        Z = compute_symmpad_3d(Z,self.fact_pad)  # applies symmetric padding to the datacube with the help of tools.compute_symmpad_3d
+        Z = np.fft.fft2(Z, norm='ortho')    # applies symmetric boundaries condtions to the upsampled hyperspectral datacubes
 
-        mean = self._meanSpectrumFourier(X_mean, Z)
+        mean = self._meanSpectrumFourier(mean, Z)
 
         return V, Z, mean
 
     @staticmethod
-    def _pca_projection(X: np.array, lacp: int ) ->  Union[np.array, np.array, np.array]:
+    def _pca_projection(X: np.array, lacp: int) ->  Union[np.array, np.array, np.array]:
         """
         Performs a PCA decomposition on the hyperspectral image in order to retrieve the matrixes V, Z and mean.
         The PCA is applied for preprocessing the hyperspectral datacubes.
-        :param X   : the flattenned hyperspectral datacubes
+        :param X   : the flattened hyperspectral datacubes
         :param lacp:  number of dimension for the reduced spectral space.
         :return    :  V - the PCA projection matrix, Z- the projected cube,  mean - the centered data
         """
 
-    #############################################
-    #               PCA Projection
-    #############################################
+
+
+        #############################################
+        #               PCA Projection
+        #############################################
 
         X_mean = np.mean(X.T, axis=0)
         X -= X_mean
@@ -156,17 +155,17 @@ class CubeHyperSpectral(Cube):
         S = S[:lacp]
 
 
-    #############################################
-    #               PCA Decomposition
-    #############################################
+        #############################################
+        #               PCA Decomposition
+        #############################################
 
         Z = U[:, :lacp] * (S ** (1 / 2))
         V = np.dot(np.diag(S ** (1 / 2)), V[:lacp])
 
-        return V.T, Z, mean
+        return V.T, Z, X_mean
 
     @staticmethod
-    def  _upsampling(Z: np.array, x_M: int, y_M: int)-> np.array:
+    def  _upsampling(Z: np.array, x_multi: int, y_multi: int, lacp:int)-> np.array:
         """
         Performs a bi-cubic interpolation under symmetric boundaries conditions
         : param Z   : the PCA retroprojected datacube
@@ -174,11 +173,11 @@ class CubeHyperSpectral(Cube):
         : param y_M : second spatial dimension of the Multispectral image
         : returns   : the resized and interpolated datacube Z_interpol
         """
-        Z_upsampled = resize(Z, (n_comp, x_M, y_M), order=3, mode='symmetric')
+        Z_upsampled = resize(Z, (lacp, x_multi, y_multi), order=3, mode='symmetric')
         return Z_upsampled
 
 
-# not sure about about keeping these two ...
+# not sure about  keeping these two ...
 #    @staticmethod
 #    def _padding(Z: np.array, fact_pad: int)-> np.array:
 #        """
@@ -214,26 +213,24 @@ class CubeHyperSpectral(Cube):
         mean[:, 0] = X_mean * np.sqrt(N)
         return mean
 
-    def preprocess(YnirSpec: np.array, YnirCam: np.array, Lh: np.array, mean: np.array, fact_pad: int, d: int) -> np.array :
+    def preprocess(self, YnirCam: np.array, Lh: np.array, mean: np.array) -> np.array :
         """
-        Preprocessing for the hyperspectral image only. Needs the mean form the PCA decomposition.
+        Preprocessing for the hyperspectral image only. Needs the mean form the PCA decomposition to substract the mean spectrum to each pixel.
 
-        :param YnirSpec: the hyperspectral image
         :param YnirCam : the multispectral image
         :param Lh: the spectral operator retrieved from LH.fits
         :param mean: from the PCA projection on the hyperspectral datacubes
         :return: the fusion-ready hyperspectral image
         """
         print(' Operators and data preprocessing : ')
-
-        z, x_H, y_H = YnirSpec.shape
-        x_M, y_M    = YnirCam.shape[1], YnirCam.shape[2]  # only used for the aliasing
+        YnirSpec = self.data
+        x_multi, y_multi = YnirCam.shape[1], YnirCam.shape[2]  # only used for the aliasing
 
         #############################################
         #               FFT on YnirSpec
         #############################################
 
-        Yns = compute_symmpad_3d(YnirSpec,  fact_pad//d+1)
+        Yns = compute_symmpad_3d(YnirSpec,  self.fact_pad//self.d+1)
         Yns = np.fft.fft2(Yns[:, :-2, :-2], axes=(1, 2), norm='ortho')
 
         #############################################
@@ -241,50 +238,79 @@ class CubeHyperSpectral(Cube):
         #############################################
 
         mean[:, 0] = mean[:, 0] * get_g_mean() # Applying the NirSpec PSF to the mean
-        Yns        = np.reshape(Yns, (z, x_H * y_H)) - np.dot(np.diag(Lh), aliasing(mean_, (z, x_M, y_M)))
+        Yns        = np.reshape(Yns, (self.wave, self.x_hyper * self.y_hyper)) - np.dot(np.diag(Lh), aliasing(mean, (self.wave, x_multi, y_multi)))
         return Yns
 
 class CubeMultisSectral(Cube):
 
-    def __init__(self,data:np.array, mask: np.array =None, **kwargs) -> None:
-        super().__init__(data, mask, **kwargs) # appelle classe mere
-        # truc supplementaires
+    def __init__(self, data : np.array, fact_pad:int, **kwargs) -> None:
+        super().__init__(data, fact_pad) # appelle classe mere
+        self.wave, self.x_multi, self.y_multi = self.data.dim[0],self.dim[1], self.dim[2]
 
-    def loading_datacubes(self, dataMS: str) -> np.array :
-    """
-    :param dataHS: the path to the .fits multispectral image
-    :type data: str
-    :return: np.array
 
-    """
-        YnirCam  = fits.getdata(MultiSpectral_Image)
-        return YnirCam
-
-    def preprocess(YnirCam: np.array, Lm: np.array, mean: np.array, fact_pad: int) -> np.array:
+    def preprocess(self, Lm: np.array, mean: np.array) -> np.array:
         """
         Performs preprocessing for the multispectral image. Needs the mean from the PCA decomposition performed on the hyperspectral image.
-        :param YnirCam : the multispectral image
         :param Lm: the spectral operator retrieved from LM.fits
         :param mean: from the PCA projection on the hyperspectral datacubes
-        :param fact_pad : padding factor
         :return: the fusion-ready multispectral image
         """
         print(' Operators and data preprocessing : ')
 
-        z, x, y = YnirCam.shape
-
         #############################################
         #               FFT on YnirSpec
         #############################################
-        Ync = compute_symmpad_3d(YnirCam,  fact_pad)
+        YnirCam = self.data
+        Ync = compute_symmpad_3d(YnirCam,  self.fact_pad)
         Ync = np.fft.fft2(Ync, axes=(1, 2), norm='ortho')
 
         #############################################
         #               Substracting the mean image
         #############################################
         mean[:, 0] = mean[:, 0] * get_h_mean() # Applying the NirSpec PSF to the mean
-        Ync = np.reshape(Ync, (z, x * y)) - np.dot(np.diag(Lm), mean)
+        Ync = np.reshape(Ync, (self.wave, self.x_multi * self.y_multi)) - np.dot(np.diag(Lm), mean)
 
         return Ync
 #self = objet lui meme
 #cls renvoie a la classe,  pas de self en static
+#    def loading_datacubes(self, dataHS: str) -> np.array: # a mettre dans tools.py
+    """
+    Fetching the datacubes files from the given path
+
+    : param dataHS: the path to the .fits hyperspectral image 
+    : type data: str
+    : return: np.array    
+   
+    """
+#       YnirSpec = fits.getdata(HyperSpectral_Image)
+#        return YnirSpec
+#            @staticmethod
+#     def make3d( data: np.array, mask, *args, **kwargs) -> np.array:
+#         r"""
+#         .. codeauthor:: Lina Issa - IRAP <lina.issa@irap.omp.eu>
+#         Transform a 2d array into a 3d flatten array
+#
+#         : param data: input data
+#         :type data: numpy array
+#         :return: flatten array
+#         :rtype: np.array
+#         """
+#         bands, pix1, pix2, = data.shape
+#         x, y = np.arange(pix1), np.arange(pix2)
+#         MX, MY = np.meshgrid(y, x)
+#         X_cube = np.full((bands, pix1, pix2), np.nan)
+#         if bands in data.shape:
+#
+#             if data.shape[0] == bands:
+#                 for x, y, z in zip(MX[~mask], MY[~mask], range(X.shape[1])):
+#                     X_cube[:, y, x] = data[:, z]
+#             if data.shape[1] == bands:
+#                 for x, y, z in zip(MX[~mask], MY[~mask], range(X.shape[0])):
+#                     X_cube[:, y, x] = data[z, :]
+#             return X_cube
+#         else:
+#             raise TypeError(
+#                 f'The given number of bands {bands} is in conflict with the shape of the given data {X.shape[0], X.shape[1]}.')
+#
+#  #if mask is not None and not isinstance(mask, np.array): a mettre dans preprocess
+#    raise TypeError(f'mask has type {type(mask)} but it must be a numpy array or a NoneType ')#
