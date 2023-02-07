@@ -1,28 +1,33 @@
 from datetime import time
 
-import numpy as np
+import numpy        as np
 import scipy.sparse as sp
-from typing import Union, Optional
-from abc import ABC, abstractmethod
-
-from astropy.io import fits
-
-from tools import get_h_band, get_g_band, aliasing_adj, _centered
-from Cube import CubeHyperSpectral, CubeMultiSpectral
+from typing import Union
+from abc    import ABC, abstractmethod
+from tools  import get_h_band, get_g_band, aliasing_adj, _centered
+from Cube   import CubeHyperSpectral, CubeMultiSpectral
 
 
 class Fusion(ABC):
     '''
-    @author: Lina Issa
+    @author: Lina Issa, adapted from Claire Guilloteau's code FRHOMAGE
 
-    Fusion is an abstract class gathering all the procedures that are regardless to the regularisation. This includes the vectorial-based method of computing  the matrix A, B and C that are attached to the data.
-    The conjugate gradient and the regularisation part of the matrix A is then defined specifically for each class inheriting the class Fusion. One must also define the fusion procedure inside each subclass.
-    :param cubeMultiSpectral: A CubeMultiSpectral object that has been instantiating. The call method takes care of preprocessing the multi-spectral image.
-    :param cubeHyperSpectral: A cubeHyperSpectral object that has been instantiating. The call method takes care of preprocessing the hyper-spectral image.
-    :param Lm: The spectral degradation operator on the multi-spectral image. Should be the same as the one given to the call of cubeMultiSpectral. The path to the Lm.fits file is defined in the configuration file.
+    Fusion is an abstract class gathering all the procedures that are regardless to the regularisation. This includes
+    the vectorial-based method of computing  the matrix A, B and C that are attached to the data. The conjugate
+    gradient and the regularisation part of the matrix A is then defined specifically for each class inheriting the
+    class Fusion. One must also define the fusion procedure inside each subclass.
+    :param cubeMultiSpectral: A CubeMultiSpectral object that has been instantiating.
+    The call method takes care of preprocessing the  multi-spectral image.
+    :param cubeHyperSpectral: A cubeHyperSpectral object that has been instantiating. The call
+    method takes care of preprocessing the hyper-spectral image.
+    :param Lm: The spectral degradation operator on the
+    multi-spectral image. Should be the same as the one given to the call of cubeMultiSpectral. The path to the
+    Lm.fits file is defined in the configuration file.
     :param nc: a parameter defined in the configuration file
     :param nr: a parameter defined in the configuration file
-    :param mu: a parameter that controls the regularisation strength. By default, mu=10
+    :param mu: a parameter that controls the regularisation
+    strength. By default, mu=10
+
     '''
 
     def __init__(self, cubeMultiSpectral: CubeMultiSpectral, cubeHyperSpectral: CubeHyperSpectral, Lm: np.array,
@@ -40,10 +45,12 @@ class Fusion(ABC):
 
         if sig2_ms is None:
             raise ValueError(
-                'By instantiating the class CubeMultiSpectral, the observed noise variance in the multi-spectral image will be computed.')
+                'By instantiating the class CubeMultiSpectral, the observed noise variance in the multi-spectral '
+                'image will be computed.')
         if sig2_hs is None:
             raise ValueError(
-                'By instantiating the class CubeHyperSpectral, the observed noise variance in the hyperspectral image will be computed.')
+                'By instantiating the class CubeHyperSpectral, the observed noise variance in the hyperspectral image '
+                'will be computed.')
 
         sig2 = [sig2_ms, sig2_hs]
 
@@ -61,14 +68,249 @@ class Fusion(ABC):
         self.sbnc = 1 / (sig2[0] * nr * nc * self.lm)
         self.sbns = 1 / (sig2[1] * (nr // self.d) * (nc // self.d) * self.lh)
 
-    def spatial_regularisation(self) -> Union[tuple, tuple]:
+    @abstractmethod
+    def spatial_regularisation(self, D: np.array, Wd: np.array, Z: np.array) -> np.array:
+        '''
+        @author: Lina Issa, adapted from Claire Guilloteau's code FRHOMAGE
+
+        Constructs the spatial regularisation for the conjugate gradient. Should be overriden in each subclass that inherits
+        from Fusion.
+        :param D : the computed operator of finite differences from the spatial regularisation method.
+        :param Wd: the computed matrix of weights from the spatial regularisation method
+        :param Z : the spectral-reduced hyperspectral cube from the PCA projection carried out during the preprocessing.
+        Z is stored as attribute of Fusion class for simplifying its retrieval.
+        :return  : Areg, the part of the matrix A that contains the regularisation information
+        '''
+        return
+
+    @abstractmethod
+    def conjugate_gradient(self, *args, **kwargs):
+        """
+        @author: Lina Issa, adapted from Claire Guilloteau's code FRHOMAGE
+
+        Performs the conjugate gradient algorithm, the keystone in the fusion framework. To be adapted in each
+        subclass that inherits from Fusion. The spatial regularisation method is computed each time Z is updated.
+        :param args  : depends on the regularisation type but should include at least: A, D, Wd, B, C and Z
+        :param kwargs:
+        :return: Z the fusion product and obj the objective function
+        """
+        return
+
+    @abstractmethod
+    def __call__(self, *args, **kwargs):
+        """
+        @author: Lina Issa, adapted from Claire Guilloteau's code FRHOMAGE
+
+        Put the fusion framework into action by first writing the inverse problem as a linear system with vectorized
+        matrix,that is solved by a conjugate gradient in a Fast Fourier domain. The formulation of the linear system
+        being regularisation independent, it is carried out by the initialisation which stores the matrix in class
+         attributes. The call method performs the conjugate gradient accordingly to the chosen regularisation.
+        :param args:
+        :param kwargs:
+        :return: Z the product of the fusion
+        :return: obj the objective function
+        """
+        return
+
+    @staticmethod
+    def _M(i: int,j: int, phv: float, nr: int, nc: int):
+        """
+        @author: Lina Issa, adapted from Claire Guilloteau's code FRHOMAGE
+
+        is called in the Anc function
+        :param i:
+        :param j:
+        :param phv:
+        :param nr:
+        :param nc:
+        :return:
+        """
+        res = np.zeros(nr * nc, dtype=np.complex)
+        nf = phv.shape[0]
+        for m in range(nf):
+            res += np.conj(phv[m, j]) * phv[m, i]
+        return res
+
+    @staticmethod
+    def _C(i, j, V, row, col, nr, nc, d):
         """
         @author Lina Issa, adapted from Claire Guilloteau's FROMHAGE
-        Computing weights for the spatial regularisation
 
-        :return:  D operator of finite differences, Wd the weights matrix
+        is called in the Ans function
+        :param j:
+        :param V:
+        :param row:
+        :param col:
+        :param nr:
+        :param nc:
+        :param d:
+        :return:
         """
-        V = self.V  # the singular values matrix from the PCA decompostion performed on hyperspectral matrix
+        res = np.zeros(nr * nc * d ** 2, dtype=np.complex)
+        lh = len(V)
+        for m in range(lh):
+            g = get_g_band(m)
+            gntng = d ** (-2) * np.conj(g[row]) * g[col]
+            res += (V[m, i] * gntng * V[m, j])
+        return res
+
+    @staticmethod
+    def _nTn_sparse(nr: int, nc: int, d: int):
+        """
+        @author Lina Issa, adapted from Claire Guilloteau's FROMHAGE
+
+        is called in the Ans function
+        """
+        n1 = sp.identity(nc // d)
+        n2_ = n1.copy()
+        for i in range(d - 1):
+            n2_ = sp.hstack((n2_, n1))
+        n2 = n2_.copy()
+        for i in range(d - 1):
+            n2 = sp.vstack((n2, n2_))
+        n3 = n2.copy()
+        for i in range(nr // d - 1):
+            n3 = sp.block_diag((n3, n2))
+        n4_ = n3.copy()
+        for i in range(d - 1):
+            n4_ = sp.hstack((n4_, n3))
+        n4 = n4_.copy()
+        for i in range(d - 1):
+            n4 = sp.vstack((n4, n4_))
+        return n4
+
+    @staticmethod
+    def _FiniteDifferenceOperator(nr: int, nc: int) -> tuple:
+        """
+        @author Lina Issa, adapted from Claire Guilloteau's FROMHAGE
+
+        is called in the preprocess_spatial_regularisation method.
+        """
+        size = (nr, nc)
+        Dx = np.zeros(size)
+        Dy = np.zeros(size)
+
+        Dx[0, 0] = 1
+        Dx[0, 1] = -1
+        Dy[0, 0] = 1
+        Dy[1, 0] = -1
+
+        Dx = np.fft.fft2(Dx)
+        Dy = np.fft.fft2(Dy)
+        return Dx, Dy
+
+    @staticmethod
+    def _PHV(lacp: int, Lm: np.array, V, nr: int, nc: int) -> np.array:
+        """
+        @author Lina Issa, adapted from Claire Guilloteau's FROMHAGE
+
+        is called in the _Anc method
+
+        """
+
+        nf = Lm.shape[0]
+        lh = V.shape[0]
+        res = np.zeros((nf, lacp, nr * nc), dtype=np.complex)
+        print(' *** PHV computation ***')
+        for m in range(nf):
+            for i in range(lacp):
+                sum_h = np.zeros(nr * nc, dtype=np.complex)
+                for l in range(lh):
+                    sum_h += get_h_band(l) * Lm[m, l] * V[l, i]
+                res[m, i] = sum_h
+        return res
+
+    def _Anc(self) -> np.array:
+        """
+        @author Lina Issa, adapted from Claire Guilloteau's FROMHAGE
+
+        Computes the part of the matrix A related to the multi-spectral image. Called in MatrixA_data method
+        """
+        nc   = self.nc
+        nr   = self.nr
+        lacp = self.lacp
+
+        t1 = time()
+        row = np.arange(nr * nc)
+        row = np.matlib.repmat(row, 1, lacp ** 2)[0]
+        for i in range(lacp):
+            row[i * nr * nc * lacp:(i + 1) * nr * nc * lacp] += i * nr * nc
+        col = np.arange(nr * nc * lacp)
+        col = np.matlib.repmat(col, 1, lacp)[0]
+
+        phv = self._PHV(lacp, self.Lm, self.V, nr, nc)
+        mat = np.reshape(np.reshape(np.arange(lacp ** 2), (lacp, lacp)).T, lacp ** 2)
+        data = np.zeros((lacp ** 2, nr * nc), dtype=np.complex)
+        for i in range(lacp):
+            # print('i='+str(i))
+            for j in range(lacp - i):
+                # print('j='+str(j+i))
+                temp = self._M(i, j + i, phv, nr, nc)
+                if j == 0:
+                    data[i * (lacp + 1)] = temp
+                else:
+                    index = j + i * (lacp + 1)
+                    data[mat[index]] = np.conj(temp)
+                    data[index] = temp
+        data = np.reshape(data, (lacp ** 2 * nr * nc))
+        anc = sp.coo_matrix((data, (row, col)), shape=(lacp * nr * nc, lacp * nr * nc), dtype=np.complex)
+        t2 = time()
+        print('Anc computation time : ' + str(t2 - t1) + 's.')
+
+        return anc
+
+    def _Ans(self, Lh: np.array) -> np.array:
+        """
+        @author Lina Issa, adapted from Claire Guilloteau's FROMHAGE
+
+        Computes the part of the matrix A related to the hyper-spectral image. Called in MatrixA_data method
+        """
+        nc = self.nc
+        nr = self.nr
+        d = self.d
+        lacp = self.lacp
+
+        t1 = time()
+        ntn = _nTn_sparse(nr, nc, d)
+        V = np.dot(np.diag(Lh), self.V)
+        row = np.matlib.repmat(ntn.row, 1, lacp ** 2)[0]
+        for i in range(lacp):
+            row[i * nr * nc * lacp * d ** 2:(i + 1) * nr * nc * lacp * d ** 2] += i * nr * nc
+        col = np.zeros(nr * nc * d ** 2 * lacp)
+        for i in range(lacp):
+            col[i * nr * nc * d ** 2:(i + 1) * nr * nc * d ** 2] = ntn.col + i * nr * nc
+        col = np.matlib.repmat(col, 1, lacp)[0]
+        mat = np.reshape(np.reshape(np.arange(lacp ** 2), (lacp, lacp)).T, lacp ** 2)
+        data = np.zeros((lacp ** 2, nr * nc * d ** 2), dtype=np.complex)
+        for i in range(lacp):
+            # print('i='+str(i))
+            for j in range(lacp - i):
+                # print('j='+str(j+i))
+                temp = self._C(i, j + i, V, ntn.row, ntn.col, nr, nc, d)
+                if j == 0:
+                    data[i * (lacp + 1)] = temp
+                else:
+                    index = j + i * (lacp + 1)
+                    data[mat[index]] = np.conj(temp)
+                    data[index] = temp
+        data = np.reshape(data, np.prod(data.shape))
+        t2 = time()
+        print('Ans computation time : ' + str(t2 - t1) + 's.')
+        ans = sp.coo_matrix((data, (row, col)), shape=(lacp * nr * nc, lacp * nr * nc), dtype=np.complex)
+
+        return ans
+
+
+    def preprocess_spatial_regularisation(self) -> Union[tuple, tuple]:
+        """
+        @author Lina Issa, adapted from Claire Guilloteau's FROMHAGE
+
+        Computing weights is part of the preprocessing for the spatial regularisation, regardless to the type of
+        regularisation.
+        :return: D operator of finite differences
+        :return: Wd the weights matrix
+        """
+        V  = self.V  # the singular values matrix from the PCA decompostion performed on hyperspectral matrix
         Ym = self.Y_multi  # the preprocessed multi-spectral image
         Lm = self.Lm  # the spectral degradation operator on multi-spectral image
         nr, nc = self.nr, self.nc
@@ -76,7 +318,7 @@ class Fusion(ABC):
         #              Computing the operator of finite difference  #
         #############################################################
 
-        D = self._FiniteDifferenceOperator(nr, nc)
+        D = _FiniteDifferenceOperator(nr, nc)
 
         #############################################################
         #              Computing Ym D                               #
@@ -116,188 +358,15 @@ class Fusion(ABC):
         Wd = (Wd - np.min(Wd)) / np.max(Wd - np.min(Wd))
         return D, Wd
 
-    @abstractmethod
-    def MatrixA_reg(self, D: np.array, Wd: np.array, Z: np.array) -> np.array:
-        return
-
-    @abstractmethod
-    def conjugate_gradient(self, *args, **kwargs):
-        return
-
-
-    @abstractmethod
-    def __call__(self, *args, **kwargs) :
-        return
-
-
-    @staticmethod
-    def _FiniteDifferenceOperator(nr: int, nc: int) -> tuple:
-
-        size = (nr, nc)
-        Dx = np.zeros(size)
-        Dy = np.zeros(size)
-
-        Dx[0, 0] = 1
-        Dx[0, 1] = -1
-        Dy[0, 0] = 1
-        Dy[1, 0] = -1
-
-        Dx = np.fft.fft2(Dx)
-        Dy = np.fft.fft2(Dy)
-        return Dx, Dy
-
-    @staticmethod
-    def _PHV(lacp: int, Lm: np.array, V, nr: int, nc: int):
-
-        nf = Lm.shape[0]
-        lh = V.shape[0]
-        res = np.zeros((nf, lacp, nr * nc), dtype=np.complex)
-        print(' *** PHV computation ***')
-        for m in range(nf):
-            for i in range(lacp):
-                sum_h = np.zeros(nr * nc, dtype=np.complex)
-                for l in range(lh):
-                    sum_h += get_h_band(l) * Lm[m, l] * V[l, i]
-                res[m, i] = sum_h
-        return res
-
-    @staticmethod
-    def _M(i, j, phv, nr, nc):
-        """
-        is called in the Anc function
-        :param j:
-        :param phv:
-        :param nr:
-        :param nc:
-        :return:
-        """
-        res = np.zeros(nr * nc, dtype=np.complex)
-        nf = phv.shape[0]
-        for m in range(nf):
-            res += np.conj(phv[m, j]) * phv[m, i]
-        return res
-
-    @staticmethod
-    def _C(i, j, V, row, col, nr, nc, d):
-        """
-        is called in the Ans function
-        :param j:
-        :param V:
-        :param row:
-        :param col:
-        :param nr:
-        :param nc:
-        :param d:
-        :return:
-        """
-        res = np.zeros(nr * nc * d ** 2, dtype=np.complex)
-        lh = len(V)
-        for m in range(lh):
-            g = get_g_band(m)
-            gntng = d ** (-2) * np.conj(g[row]) * g[col]
-            res += (V[m, i] * gntng * V[m, j])
-        return res
-
-    def _Anc(self) -> Union[np.array, np.array]:
-        """
-        :return:
-        """
-        nc = self.nc
-        nr = self.nr
-        lacp = self.lacp
-
-        t1 = time()
-        row = np.arange(nr * nc)
-        row = np.matlib.repmat(row, 1, lacp ** 2)[0]
-        for i in range(lacp):
-            row[i * nr * nc * lacp:(i + 1) * nr * nc * lacp] += i * nr * nc
-        col = np.arange(nr * nc * lacp)
-        col = np.matlib.repmat(col, 1, lacp)[0]
-
-        phv = self._PHV(lacp, self.Lm, self.V, nr, nc)
-        mat = np.reshape(np.reshape(np.arange(lacp ** 2), (lacp, lacp)).T, lacp ** 2)
-        data = np.zeros((lacp ** 2, nr * nc), dtype=np.complex)
-        for i in range(lacp):
-            # print('i='+str(i))
-            for j in range(lacp - i):
-                # print('j='+str(j+i))
-                temp = self._M(i, j + i, phv, nr, nc)
-                if j == 0:
-                    data[i * (lacp + 1)] = temp
-                else:
-                    index = j + i * (lacp + 1)
-                    data[mat[index]] = np.conj(temp)
-                    data[index] = temp
-        data = np.reshape(data, (lacp ** 2 * nr * nc))
-        anc = sp.coo_matrix((data, (row, col)), shape=(lacp * nr * nc, lacp * nr * nc), dtype=np.complex)
-        t2 = time()
-        print('Anc computation time : ' + str(t2 - t1) + 's.')
-
-        return anc
-
-    def _Ans(self, Lh: np.array) -> np.array:
-        """
-        """
-        nc = self.nc
-        nr = self.nr
-        d = self.d
-        lacp = self.lacp
-
-        t1 = time()
-        ntn = self._nTn_sparse(nr, nc, d)
-        V = np.dot(np.diag(Lh), self.V)
-        row = np.matlib.repmat(ntn.row, 1, lacp ** 2)[0]
-        for i in range(lacp):
-            row[i * nr * nc * lacp * d ** 2:(i + 1) * nr * nc * lacp * d ** 2] += i * nr * nc
-        col = np.zeros(nr * nc * d ** 2 * lacp)
-        for i in range(lacp):
-            col[i * nr * nc * d ** 2:(i + 1) * nr * nc * d ** 2] = ntn.col + i * nr * nc
-        col = np.matlib.repmat(col, 1, lacp)[0]
-        mat = np.reshape(np.reshape(np.arange(lacp ** 2), (lacp, lacp)).T, lacp ** 2)
-        data = np.zeros((lacp ** 2, nr * nc * d ** 2), dtype=np.complex)
-        for i in range(lacp):
-            # print('i='+str(i))
-            for j in range(lacp - i):
-                # print('j='+str(j+i))
-                temp = self._C(i, j + i, V, ntn.row, ntn.col, nr, nc, d)
-                if j == 0:
-                    data[i * (lacp + 1)] = temp
-                else:
-                    index = j + i * (lacp + 1)
-                    data[mat[index]] = np.conj(temp)
-                    data[index] = temp
-        data = np.reshape(data, np.prod(data.shape))
-        t2 = time()
-        print('Ans computation time : ' + str(t2 - t1) + 's.')
-        ans = sp.coo_matrix((data, (row, col)), shape=(lacp * nr * nc, lacp * nr * nc), dtype=np.complex)
-
-        return ans
-
-    @staticmethod
-    def _nTn_sparse(nr: int, nc: int, d: int):
-        n1 = sp.identity(nc // d)
-        n2_ = n1.copy()
-        for i in range(d - 1):
-            n2_ = sp.hstack((n2_, n1))
-        n2 = n2_.copy()
-        for i in range(d - 1):
-            n2 = sp.vstack((n2, n2_))
-        n3 = n2.copy()
-        for i in range(nr // d - 1):
-            n3 = sp.block_diag((n3, n2))
-        n4_ = n3.copy()
-        for i in range(d - 1):
-            n4_ = sp.hstack((n4_, n3))
-        n4 = n4_.copy()
-        for i in range(d - 1):
-            n4 = sp.vstack((n4, n4_))
-        return n4
-
     def MatrixA_data(self, Lh: np.array) -> np.array:
         """
-        Computes the data-related matrix A, ie without taking into account the regularization. This matrix needs to be computed once for all regardless of the chosen regularisation.
+        @author: Lina Issa, adapted from Claire Guilloteau's code FRHOMAGE
 
-        :param Lh: the spectral degradation operator applied to the hyperspectral image. Should be the same as the one given to the call of cubeMultiSpectral. The path to the Lm.fits file is defined in the configuration file.
+        Computes the data-driven matrix A, ie without taking into account the regularization. This matrix needs to be
+        computed once for all regardless of the chosen regularisation.
+
+        :param Lh: the spectral degradation operator applied to the hyperspectral image. Should be the same as the one
+        given to the call of cubeMultiSpectral. The path to the Lm.fits file is defined in the configuration file.
         :return: The matrix A attached to the data
         """
         ################################################
@@ -321,7 +390,9 @@ class Fusion(ABC):
 
     def MatrixB_data(self, Lh: np.array) -> np.array:
         """
-        :param Lh: the spectral degradation operator applied to the hyperspectral image. Should be the same as the one given to the call of cubeMultiSpectral. The path to the Lm.fits file is defined in the configuration file.
+        :param Lh: the spectral degradation operator applied to the hyperspectral image.
+        Should be the same as the one given to the call of cubeMultiSpectral. The path to the Lm.fits file is defined
+        in the configuration file.
         :return: The matrix B
         """
         Ym, Yh = self.Y_multi, self.Y_hyper
@@ -371,7 +442,7 @@ class Fusion(ABC):
 
         return C
 
-    def _postprocess(self, Zfusion: np.array) -> np.array:  # a mettre dans le module Cube.py ?
+    def postprocess(self, Zfusion: np.array) -> np.array:  # a mettre dans le module Cube.py ?
 
         Zfusion = np.reshape(Zfusion, (self.lacp, self.nr, self.nc))
         Zfusion = np.fft.ifft2(Zfusion, norm='ortho')
@@ -380,16 +451,21 @@ class Fusion(ABC):
 
         return Zfusion
 
-
 class Weighted_Sobolev_Reg(Fusion):
     def __init__(self, cubeMultiSpectral: CubeMultiSpectral, cubeHyperSpectral: CubeHyperSpectral, Lm: np.array,
+                 Lh: np.array,
                  nc: int, nr: int) -> None:
         super().__init__(cubeMultiSpectral, cubeHyperSpectral, Lm, nc, nr, mu=10)
+        # Linear System
+
+        self.A = self.MatrixA_data(Lh)
+        self.B = self.MatrixB_data(Lh)
+        self.C = self.MatrixC_data()
 
     @abstractmethod
-    def _MatrixA_reg(self, D: np.array, Wd: np.array, Z: np.array) -> np.array:
+    def spatial_regularisation(self, D: np.array, Wd: np.array, Z: np.array) -> np.array:
         """
-        Constructs the regularisation part of the matrix A
+        Constructs the regularisation part of the matrix A. Needs D and Wd from the preprocessing
         :param D :  as computed by the spatial regularisation preprocessing
         :param Wd:  as computed by the spatial regularisation preprocessing
         :param Z :  the reduced hyperspectral image computed by the PCA. The value of Z chang
@@ -405,12 +481,12 @@ class Weighted_Sobolev_Reg(Fusion):
     @abstractmethod
     def conjugate_gradient(self, A, D, Wd, B, C, Z, save_it=False) -> Union[np.array, np.array]:
         """
-        :param A:
-        :param D:
-        :param Wd:
-        :param B:
-        :param C:
-        :param Z:
+        :param A: the vectorized data-driven A from MatrixA_data class method.
+        :param D: the operator of finite differences from the spatial regularisation preprocess method
+        :param Wd: the weights matrix retrieved from the spatial regularisation preprocess method
+        :param B: the vectorized matrix B from MatrixB_data class method
+        :param C: the vectorized matrix C from MatrixB_data class method
+        :param Z: the spectral-reduced hyperspectral image stored as a class attribute.
         :param save_it: boolean, by default False
         :return: Z and obj
         """
@@ -422,16 +498,15 @@ class Weighted_Sobolev_Reg(Fusion):
 
         ########## Control procedure ##########
         print('NANs in Az, b and A_reg z : ' + str(np.sum(np.isnan(A.dot(Z)))) + ' ; ' + str(
-            np.sum(np.isnan(B))) + ' ; ' + str(np.sum(np.isnan(self._MatrixA_reg(D, Wd, Z)))))
+            np.sum(np.isnan(B))) + ' ; ' + str(np.sum(np.isnan(self.spatial_regularisation(D, Wd, Z)))))
         #######################################
 
-        r = A.dot(Z) + B + self._MatrixA_reg(D, Wd, Z)
+        r = A.dot(Z) + B + self.spatial_regularisation(D, Wd, Z)
         p = -r.copy()
         # Objective function
         obj = [0.5 * np.dot(np.conj(Z).T, A.dot(Z)) + np.dot(np.conj(B.T), Z) + C + 0.5 * np.dot(np.conj(Z).T,
-                                                                                                 self._MatrixA_reg(D,
-                                                                                                                   Wd,
-                                                                                                                   Z))]
+                                                                                                 self.spatial_regularisation(
+                                                                                                     D, Wd, Z))]
         print(str(nb_it) + ' -- Objective function value : ' + str(obj[nb_it]))
         ########## Control procedure ##########
         if np.isnan(obj):
@@ -439,7 +514,7 @@ class Weighted_Sobolev_Reg(Fusion):
             print('NANs in 0,5* zt A z : ' + str(np.sum(np.isnan(0.5 * np.dot(np.conj(Z).T, A.dot(Z))))))
             print('NANs in bt z : ' + str(np.sum(np.isnan(np.dot(np.conj(B.T), Z)))))
             print('NANs in 0,5* zt A_reg z : ' + str(
-                np.sum(np.isnan(0.5 * np.dot(np.conj(Z).T, self._MatrixA_reg(D, Wd, Z))))))
+                np.sum(np.isnan(0.5 * np.dot(np.conj(Z).T, self.spatial_regularisation(D, Wd, Z))))))
         ######################################
 
         # Stopping criterion
@@ -447,7 +522,7 @@ class Weighted_Sobolev_Reg(Fusion):
         # Iterations
         # while stop > 1e-8 and nb_it < 2000:
         while stop > 1e-4 and nb_it < 200:
-            areg = self._MatrixA_reg(D, Wd, p)
+            areg = self.spatial_regularisation(D, Wd, p)
             alpha = np.dot(np.conj(r).T, r) * (np.dot(np.conj(p).T, A.dot(p)) + np.dot(np.conj(p).T, areg)) ** -1
             Z = Z + alpha * p
             r_old = r.copy()
@@ -456,7 +531,7 @@ class Weighted_Sobolev_Reg(Fusion):
             p = -r + beta * p
             nb_it += 1
             obj.append(0.5 * np.dot(np.conj(Z).T, A.dot(Z)) + np.dot(np.conj(B.T), Z) + C + 0.5 * np.dot(np.conj(Z).T,
-                                                                                                         self._MatrixA_reg(
+                                                                                                         self.spatial_regularisation(
                                                                                                              D, Wd, Z)))
             print(str(nb_it) + ' -- Objective function value : ' + str(obj[nb_it]))
             stop = (obj[-2] - obj[-1]) / obj[-2]
@@ -469,20 +544,20 @@ class Weighted_Sobolev_Reg(Fusion):
 
         return Z, obj
 
-    def __call__(self, Lh: np.array) -> np.array:
+    def __call__(self) -> np.array:
         # Linear System
-        A = self.MatrixA_data(Lh)
-        B = self..MatrixB_data(Lh)
-        C = self.MatrixC_data()
+        A = self.A
+        B = self.B
+        C = self.C
         Z = self.Z.copy()
-        D, Wd = self.spatial_regularisation()
+        D, Wd = self.preprocess_spatial_regularisation()
         Zfusion, obj = self.conjugate_gradient(A, D, Wd, B, C, Z)
-        Zfusion = self._postprocess(Zfusion)
+        Zfusion = self.postprocess(Zfusion)
         return Zfusion, obj
 
     # def __call__(self, regP =[], regKw = {},
     #                   gradP=[], gradKw= {}) -> np.array:
 # @abstractmethod
 # def __call__(self, regP=[], regKw={},
-    #                gradP=[], gradKw={}) -> np.array:
-    #         out = self.conjugate_gradient(*gradP, **gradKw)#
+#                gradP=[], gradKw={}) -> np.array:
+#         out = self.conjugate_gradient(*gradP, **gradKw)#
