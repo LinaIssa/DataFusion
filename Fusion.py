@@ -113,20 +113,14 @@ class Fusion(ABC):
         return
 
     @staticmethod
-    def _M(i: int,j: int, phv: float, nr: int, nc: int):
+    def _M(i: int,j: int, phv: np.array, nr: int, nc: int):
         """
         @author: Lina Issa, adapted from Claire Guilloteau's code FRHOMAGE
 
         is called in the Anc function
-        :param i:
-        :param j:
-        :param phv:
-        :param nr:
-        :param nc:
-        :return:
         """
         res = np.zeros(nr * nc, dtype=np.complex)
-        nf = phv.shape[0]
+        nf = np.shape(phv)[0]
         for m in range(nf):
             res += np.conj(phv[m, j]) * phv[m, i]
         return res
@@ -137,14 +131,7 @@ class Fusion(ABC):
         @author Lina Issa, adapted from Claire Guilloteau's FROMHAGE
 
         is called in the Ans function
-        :param j:
-        :param V:
-        :param row:
-        :param col:
-        :param nr:
-        :param nc:
-        :param d:
-        :return:
+
         """
         res = np.zeros(nr * nc * d ** 2, dtype=np.complex)
         lh = len(V)
@@ -203,6 +190,9 @@ class Fusion(ABC):
     def _PHV(lacp: int, Lm: np.array, V, nr: int, nc: int) -> np.array:
         """
         @author Lina Issa, adapted from Claire Guilloteau's FROMHAGE
+
+        computes the spectral and spatial degradation operator in the spectral reduced space induced by V.
+        That is  Lm * M * V in which M corresponds to the NirCam's PSF, LM the spectral degradation.
 
         is called in the _Anc method
 
@@ -271,7 +261,7 @@ class Fusion(ABC):
         lacp = self.lacp
 
         t1 = time()
-        ntn = _nTn_sparse(nr, nc, d)
+        ntn = self._nTn_sparse(nr, nc, d)
         V = np.dot(np.diag(Lh), self.V)
         row = np.matlib.repmat(ntn.row, 1, lacp ** 2)[0]
         for i in range(lacp):
@@ -318,7 +308,7 @@ class Fusion(ABC):
         #              Computing the operator of finite difference  #
         #############################################################
 
-        D = _FiniteDifferenceOperator(nr, nc)
+        D = self._FiniteDifferenceOperator(nr, nc)
 
         #############################################################
         #              Computing Ym D                               #
@@ -544,7 +534,7 @@ class Weighted_Sobolev_Reg(Fusion):
 
         return Z, obj
 
-    def __call__(self) -> np.array:
+    def __call__(self) -> Union[np.array, list]:
         # Linear System
         A = self.A
         B = self.B
