@@ -1,0 +1,16 @@
+CorrelationData: Input_data/simulated/h2rg_corr.fits
+DataDir: Input_data/simulated/
+LH: Input_data/simulated/Lh.fits
+LM: Input_data/simulated/Lm.fits
+OutputDir: Output/NGC7469/
+PSF_HS: Input_data/simulated/H_fft.fits
+PSF_MS: Input_data/simulated/G_fft.fits
+WaveData: Input_data/simulated/wave.fits
+hyper_image: Input_data/simulated/NIRSpec_subcube.fits
+multi_image: Input_data/simulated/NIRCam_multi.fits
+FLUXCONV_NC: 0.0009609999999999999
+downsampling: 3
+fact_pad: 41
+lacp: 10
+nc: 204
+nr: 204
