@@ -68,25 +68,26 @@ def main(config: dict):
     Lm = fits.getdata(SpectralDegradationFiles["Lm"])
     # TODO sanity check on the dimension of the images
     # TODO sanity check on the dimensions of Lm and Lh
-    if not isinstance(YnirSpec, np.array):
+    if not isinstance(YnirSpec, np.ndarray):
         raise TypeError(f'The hyperspectral image stored in {config["hyper_image"]} could not be stored in a numpy '
                         f'array')
-    if not isinstance(YnirCam, np.array):
+    if not isinstance(YnirCam, np.ndarray):
         raise TypeError(f'The multi-spectral image stored in {config["multi_image"]} could not be stored in a numpy '
                         f'array')
     l_h, pix1_h, pix2_h = YnirSpec.shape
     l_m, pix1_m, pix2_m = YnirCam.shape
-
+    lacp = config["lacp"]
     fact_pad = config["fact_pad"]
     downsampling = config["downsampling"] # sous echantillonage
-    fluxConv    = config["FLUXCONV_NC"]
-    lacp = config["lacp"]
+    fluxConv     = config["FLUXCONV_NC"]
+    PSF_HS = config["PSF_HS"]
+    PSF_MS = config["PSF_MS"]
 
 
-    cubeHyperspectral = CubeHyperSpectral(YnirSpec, YnirCam, fact_pad,  downsampling, fluxConv, lacp)
+    cubeHyperspectral = CubeHyperSpectral(YnirSpec, YnirCam, fact_pad,  downsampling, fluxConv, PSF_HS, lacp)
     cubeHyperspectral(Lh)
 
-    cubeMultiSpectral = CubeMultiSpectral(YnirCam, fact_pad)
+    cubeMultiSpectral = CubeMultiSpectral(YnirCam, fact_pad, PSF_MS)
     cubeMultiSpectral(cubeHyperspectral, Lm)
 
     ##############################################

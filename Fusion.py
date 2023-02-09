@@ -23,6 +23,8 @@ class Fusion(ABC):
     :param Lm: The spectral degradation operator on the
     multi-spectral image. Should be the same as the one given to the call of cubeMultiSpectral. The path to the
     Lm.fits file is defined in the configuration file.
+    :param PSF_MS : the path to the PSF file of NirCam defined in the configuration file
+    :param PSF_HS : the path to the PSF file of NirSpec defined in the configuraiton file
     :param nc: a parameter defined in the configuration file
     :param nr: a parameter defined in the configuration file
     :param mu: a parameter that controls the regularisation
@@ -31,7 +33,7 @@ class Fusion(ABC):
     '''
 
     def __init__(self, cubeMultiSpectral: CubeMultiSpectral, cubeHyperSpectral: CubeHyperSpectral, Lm: np.array,
-                 nc: int, nr: int, mu: int = 10, **kwargs) -> None:
+                 PSF_MS : str, PSF_HS : str, nc: int, nr: int, mu: int = 10, **kwargs) -> None:
 
         self.Y_multi = cubeMultiSpectral.Ync
         self.Y_hyper = cubeHyperSpectral.Yns
@@ -68,8 +70,11 @@ class Fusion(ABC):
         self.sbnc = 1 / (sig2[0] * nr * nc * self.lm)
         self.sbns = 1 / (sig2[1] * (nr // self.d) * (nc // self.d) * self.lh)
 
+        self.PSF_MS = PSF_MS
+        self.PSF_HS = PSF_HS
+
     @abstractmethod
-    def spatial_regularisation(self, D: np.array, Wd: np.array, Z: np.array) -> np.array:
+    def spatial_regularisation(self, D: np.ndarray, Wd: np.ndarray, Z: np.ndarray) -> np.array:
         '''
         @author: Lina Issa, adapted from Claire Guilloteau's code FRHOMAGE
 
@@ -113,7 +118,7 @@ class Fusion(ABC):
         return
 
     @staticmethod
-    def _M(i: int,j: int, phv: np.array, nr: int, nc: int):
+    def _M(i: int,j: int, phv: np.ndarray, nr: int, nc: int):
         """
         @author: Lina Issa, adapted from Claire Guilloteau's code FRHOMAGE
 
@@ -126,7 +131,7 @@ class Fusion(ABC):
         return res
 
     @staticmethod
-    def _C(i, j, V, row, col, nr, nc, d):
+    def _C(i, j, V, row, col, nr, nc, d, PSF_HS : str):
         """
         @author Lina Issa, adapted from Claire Guilloteau's FROMHAGE
 
@@ -136,7 +141,7 @@ class Fusion(ABC):
         res = np.zeros(nr * nc * d ** 2, dtype=np.complex)
         lh = len(V)
         for m in range(lh):
-            g = get_g_band(m)
+            g = get_g_band(PSF_HS, m)
             gntng = d ** (-2) * np.conj(g[row]) * g[col]
             res += (V[m, i] * gntng * V[m, j])
         return res
@@ -187,7 +192,7 @@ class Fusion(ABC):
         return Dx, Dy
 
     @staticmethod
-    def _PHV(lacp: int, Lm: np.array, V, nr: int, nc: int) -> np.array:
+    def _PHV(lacp: int, Lm: np.ndarray, V, nr: int, nc: int, PSF_MS : str) -> np.array:
         """
         @author Lina Issa, adapted from Claire Guilloteau's FROMHAGE
 
@@ -206,7 +211,7 @@ class Fusion(ABC):
             for i in range(lacp):
                 sum_h = np.zeros(nr * nc, dtype=np.complex)
                 for l in range(lh):
-                    sum_h += get_h_band(l) * Lm[m, l] * V[l, i]
+                    sum_h += get_h_band(PSF_MS, l) * Lm[m, l] * V[l, i]
                 res[m, i] = sum_h
         return res
 
@@ -228,7 +233,7 @@ class Fusion(ABC):
         col = np.arange(nr * nc * lacp)
         col = np.matlib.repmat(col, 1, lacp)[0]
 
-        phv = self._PHV(lacp, self.Lm, self.V, nr, nc)
+        phv = self._PHV(lacp, self.Lm, self.V, nr, nc, self.PSF_MS)
         mat = np.reshape(np.reshape(np.arange(lacp ** 2), (lacp, lacp)).T, lacp ** 2)
         data = np.zeros((lacp ** 2, nr * nc), dtype=np.complex)
         for i in range(lacp):
@@ -249,7 +254,7 @@ class Fusion(ABC):
 
         return anc
 
-    def _Ans(self, Lh: np.array) -> np.array:
+    def _Ans(self, Lh: np.ndarray) -> np.array:
         """
         @author Lina Issa, adapted from Claire Guilloteau's FROMHAGE
 
@@ -276,7 +281,7 @@ class Fusion(ABC):
             # print('i='+str(i))
             for j in range(lacp - i):
                 # print('j='+str(j+i))
-                temp = self._C(i, j + i, V, ntn.row, ntn.col, nr, nc, d)
+                temp = self._C(i, j + i, V, ntn.row, ntn.col, nr, nc, d, self.PSF_HS)
                 if j == 0:
                     data[i * (lacp + 1)] = temp
                 else:
@@ -348,7 +353,7 @@ class Fusion(ABC):
         Wd = (Wd - np.min(Wd)) / np.max(Wd - np.min(Wd))
         return D, Wd
 
-    def MatrixA_data(self, Lh: np.array) -> np.array:
+    def MatrixA_data(self, Lh: np.ndarray) -> np.array:
         """
         @author: Lina Issa, adapted from Claire Guilloteau's code FRHOMAGE
 
@@ -378,7 +383,7 @@ class Fusion(ABC):
 
         return A_data
 
-    def MatrixB_data(self, Lh: np.array) -> np.array:
+    def MatrixB_data(self, Lh: np.ndarray) -> np.array:
         """
         :param Lh: the spectral degradation operator applied to the hyperspectral image.
         Should be the same as the one given to the call of cubeMultiSpectral. The path to the Lm.fits file is defined
@@ -403,14 +408,14 @@ class Fusion(ABC):
 
         bnc = np.dot(Lm.T, Ym)
         for l in range(lh):
-            bnc[l] = get_h_band(l, mode='adj') * bnc[l]
+            bnc[l] = get_h_band( self.PSF_MS, l, mode='adj') * bnc[l]
         bnc = np.dot(self.V.T, bnc)
         ###########################################
         #               Hyperspectral Part        #
         ###########################################
-        Yh_ = aliasing_adj(Yh, (Yh.shape[0], nr, nc))
+        Yh_ = aliasing_adj(Yh, (Yh.shape[0], nr, nc), self.d)
         for l in range(lh):
-            Yh_[l] *= get_g_band(l, mode='adj')
+            Yh_[l] *= get_g_band(self.PSF_HS, l, mode='adj')
         bns = np.dot(np.dot(np.diag(Lh), self.V).T, Yh_)
         bm = np.reshape(-self.sbnc * bnc, np.prod(bnc.shape))
         bh = np.reshape(-self.sbns * bns, np.prod(bns.shape))
@@ -432,7 +437,7 @@ class Fusion(ABC):
 
         return C
 
-    def postprocess(self, Zfusion: np.array) -> np.array:  # a mettre dans le module Cube.py ?
+    def postprocess(self, Zfusion: np.ndarray) -> np.array:  # a mettre dans le module Cube.py ?
 
         Zfusion = np.reshape(Zfusion, (self.lacp, self.nr, self.nc))
         Zfusion = np.fft.ifft2(Zfusion, norm='ortho')
@@ -442,8 +447,8 @@ class Fusion(ABC):
         return Zfusion
 
 class Weighted_Sobolev_Reg(Fusion):
-    def __init__(self, cubeMultiSpectral: CubeMultiSpectral, cubeHyperSpectral: CubeHyperSpectral, Lm: np.array,
-                 Lh: np.array,
+    def __init__(self, cubeMultiSpectral: CubeMultiSpectral, cubeHyperSpectral: CubeHyperSpectral, Lm: np.ndarray,
+                 Lh: np.ndarray,
                  nc: int, nr: int) -> None:
         super().__init__(cubeMultiSpectral, cubeHyperSpectral, Lm, nc, nr, mu=10)
         # Linear System
@@ -453,7 +458,7 @@ class Weighted_Sobolev_Reg(Fusion):
         self.C = self.MatrixC_data()
 
     @abstractmethod
-    def spatial_regularisation(self, D: np.array, Wd: np.array, Z: np.array) -> np.array:
+    def spatial_regularisation(self, D: np.ndarray, Wd:np.ndarray, Z:np.ndarray) -> np.array:
         """
         Constructs the regularisation part of the matrix A. Needs D and Wd from the preprocessing
         :param D :  as computed by the spatial regularisation preprocessing

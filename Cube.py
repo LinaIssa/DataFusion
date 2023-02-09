@@ -17,9 +17,9 @@ class Cube(ABC): #si heritage mettre le nom de l heritage ceci est une classe ab
     The expected shape is (l, x, y) where l corresponds to the spectral dimension and x,y the spatial ones.
     """
 
-    def __init__(self, data: np.array, fact_pad : int, **kwargs) -> None:
+    def __init__(self, data: np.ndarray, fact_pad : int, **kwargs) -> None:
 
-        if not isinstance(data, np.array):
+        if not isinstance(data, np.ndarray):
             raise TypeError(f'data has type {type(data)} but it must be a numpy array ')
 
         if not isinstance(fact_pad, int) :
@@ -47,31 +47,36 @@ class CubeHyperSpectral(Cube):
     :param downsampling: a downsampling factor from the configuration file
     :param fluxConv: a flux conversion parameter from the configuration file
     :param lacp: the dimension of the reduced spectral space
+    :param PSF_HS : the path to the PSF file of NirSpec
     :param kwargs: optional parameters
     """
 
-    def __init__(self, data : np.array, YnirCam : np.array, fact_pad : int,  downsampling : int, fluxConv : float, lacp : int = 10, **kwargs) -> None:
+    def __init__(self, data : np.ndarray, YnirCam : np.ndarray, fact_pad : int,  downsampling : int, fluxConv : float,
+                 PSF_HS : str, lacp : int = 10, **kwargs) -> None:
 
         super().__init__(data, fact_pad)
         self.lacp = self._checklacp(lacp)
         self.d    = self._checkdownsampling(downsampling)
         self.fluxConv = fluxConv
-        self.wave, self.x_hyper, self.y_hyper = self.dim[0],self.dim[1], self.dim[2]
-        self.x_multi, self.y_multi = YnirCam.shape[1],  YnirCam.shape[2]
+        #self.wave, self.x_hyper, self.y_hyper = self.dim[0], self.dim[1], self.dim[2]
+        self.x_multi, self.y_multi = YnirCam.shape[1], YnirCam.shape[2]
+        self.PSF_file = PSF_HS
         self.V, self.Z, self.mean = None, None, None
-        self._Yns = None
+        self.Yns = None
         self.sig2 = None
+        self.data = self._downsizing(self.x_multi, self.y_multi)
+
         #self._Yns = self.__call__(Lh)
 
-    def __call__(self, Lh: np.array, **kwargs):
+    def __call__(self, Lh: np.ndarray, **kwargs):
 
 
         ### step 1: initialisation with PCA projection
         self.V, self.Z, self.mean = self.initialisation_HS(Lh)
 
         ### step 2: preprocess !
-        self._Yns = self.preprocess(Lh, self.mean)
-        return self._Yns
+        self.Yns = self.preprocess(Lh, self.mean)
+        return self.Yns
 
     def _checklacp(self, lacp : int) -> int:
 
@@ -97,7 +102,7 @@ class CubeHyperSpectral(Cube):
 
 
 
-    def _downsizing(self, x_multi: int, y_multi : int, *args, **kwargs) -> np.array :
+    def _downsizing(self, x_multi: int, y_multi : int, *args, **kwargs) -> np.ndarray :
         """
         @author Lina Issa
         Reshape HS image in order to set the ratio between MS and HS spatial pixel sizes to an integer
@@ -106,13 +111,14 @@ class CubeHyperSpectral(Cube):
        : returns: downsized np.array
        
        """
+        wave = self.data.shape[0]
         return resize(self.data,
-                      (self.wave,x_multi//self.d, y_multi//self.d),
+                      (wave, x_multi//self.d, y_multi//self.d),
                       order=3,
                       mode='symmetric') * (self.d**2*self.fluxConv)
 
 
-    def initialisation_HS(self,  Lh: np.array) -> Union[np.array, np.array, np.array]:
+    def initialisation_HS(self,  Lh: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
        : param YnirSpec: the hyperspectral image
        : param Lh      : the spectral operator retrieved from LH.fits
@@ -124,29 +130,38 @@ class CubeHyperSpectral(Cube):
         #############################################
         #              Flattening  YnirSpec
         #############################################
-        YnirSpec  = self._downsizing(self.x_multi, self.y_multi)
+        YnirSpec  = self.data
         self.sig2 = np.mean(YnirSpec)
-        x_multi, y_multi = self.x_multi, self.y_multi
-        X = np.reshape(np.dot(np.diag(Lh**-1), np.reshape(YnirSpec, (self.wave, self.x_hyper*self.y_hyper))), (self.wave, self.x_hyper, self.y_hyper))
+        wave, x_hyper, y_hyper = YnirSpec.shape
 
+        x_multi, y_multi = self.x_multi, self.y_multi
+        X = np.reshape(
+            np.dot(
+                np.diag(Lh**-1), np.reshape(
+                    YnirSpec, (wave, x_hyper*y_hyper)
+                )
+            ),
+            (wave, x_hyper, y_hyper)
+        )
+        X = np.reshape(X.copy(), (wave, x_hyper * y_hyper)) # depliqage du cube X
         #############################################
         #              PCA projection of  Z
         #############################################
 
-        V, Z, mean = self._pca_projection(X, self.lacp)
+        V, Z, mean = self._pca_projection(X.T, self.lacp)
 
         #############################################
         #              Retroprojection of  Z
         #############################################
 
-        Z = np.reshape(Z.T, (self.lacp, self.x_hyper, self.y_hyper))
+        Z = np.reshape(Z.T, (self.lacp, x_hyper, y_hyper))
 
         #############################################
         #              Upsampling and FFT of  Z
         #############################################
 
         Z = self._upsampling(Z, x_multi, y_multi, self.lacp)
-        Z = compute_symmpad_3d(Z,self.fact_pad)  # applies symmetric padding to the datacube with the help of tools.compute_symmpad_3d
+        Z = compute_symmpad_3d(Z, self.fact_pad)  # applies symmetric padding to the datacube with the help of tools.compute_symmpad_3d
         Z = np.fft.fft2(Z, norm='ortho')    # applies symmetric boundaries condtions to the upsampled hyperspectral datacubes
 
         mean = self._meanSpectrumFourier(mean, Z)
@@ -154,7 +169,7 @@ class CubeHyperSpectral(Cube):
         return V, Z, mean
 
     @staticmethod
-    def _pca_projection(X: np.array, lacp: int) ->  Union[np.array, np.array, np.array]:
+    def _pca_projection(X: np.ndarray, lacp: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Performs a PCA decomposition on the hyperspectral image in order to retrieve the matrixes V, Z and mean.
         The PCA is applied for preprocessing the hyperspectral datacubes.
@@ -168,8 +183,10 @@ class CubeHyperSpectral(Cube):
         #############################################
         #               PCA Projection
         #############################################
+        print(X.T.shape)
 
         X_mean = np.mean(X.T, axis=0)
+        print(X_mean.shape)
         X -= X_mean
         U, S, V = linalg.svd(X.T, full_matrices=False)
         U, V = svd_flip(U, V)
@@ -186,7 +203,7 @@ class CubeHyperSpectral(Cube):
         return V.T, Z, X_mean
 
     @staticmethod
-    def  _upsampling(Z: np.array, x_multi: int, y_multi: int, lacp:int)-> np.array:
+    def _upsampling(Z: np.ndarray, x_multi: int, y_multi: int, lacp:int) -> np.ndarray:
         """
         Performs a bi-cubic interpolation under symmetric boundaries conditions
         : param Z   : the PCA retroprojected datacube
@@ -234,7 +251,7 @@ class CubeHyperSpectral(Cube):
         mean[:, 0] = X_mean * np.sqrt(N)
         return mean
 
-    def preprocess(self, Lh: np.array, mean: np.array) -> np.array :
+    def preprocess(self, Lh: np.ndarray, mean: np.ndarray) -> np.ndarray :
         """
         Preprocessing for the hyperspectral image only. Needs the mean form the PCA decomposition to substract the mean spectrum to each pixel.
 
@@ -257,32 +274,40 @@ class CubeHyperSpectral(Cube):
         #############################################
         #               Substracting the mean image
         #############################################
+        wave, x_hyper, y_hyper = Yns.shape
+        mean[:, 0] = mean[:, 0] * get_g_mean(self.PSF_file) # Applying the NirSpec PSF to the mean
+        self.Yns   = np.reshape(Yns, (wave, x_hyper * y_hyper)) - np.dot(np.diag(Lh),
+                                                                               aliasing(
+                                                                                   mean, (wave, x_multi,y_multi),
+                                                                                   self.d
+                                                                               )
+                                                                         )
+        return self.Yns
 
-        mean[:, 0] = mean[:, 0] * get_g_mean() # Applying the NirSpec PSF to the mean
-        self._Yns        = np.reshape(Yns, (self.wave, self.x_hyper * self.y_hyper)) - np.dot(np.diag(Lh), aliasing(mean, (self.wave, x_multi, y_multi)))
-        return self._Yns
-
-class CubeMultisSectral(Cube):
+class CubeMultiSpectral(Cube):
     """
     : param data    : the multispectral image stored in a numpy array
-    : param fact_pad:
+    : param fact_pad: padding factor, a parameter in main
+    : param PSF_MS : the path to the PSF file of NirCam
+
     : return: the fusion-ready multispectral image
     """
 
-    def __init__(self, data : np.array, fact_pad:int, **kwargs) -> None:
-        super().__init__(data, fact_pad) # appelle classe mere
-        self.wave, self.x_multi, self.y_multi = self.data.dim[0],self.dim[1], self.dim[2]
-        self._Ync = None
+    def __init__(self, data : np.ndarray, fact_pad: int, PSF_MS : str, **kwargs) -> None:
+        super().__init__(data, fact_pad)
+        #self.wave, self.x_multi, self.y_multi = self.data.dim[0],self.dim[1], self.dim[2]
+        self.PSF_file = PSF_MS
+        self.Ync = None
         self.sig2 = np.mean(data)
 
-    def __call__(self, cubeHyperSpectal: CubeHyperSpectral, Lm: np.array):
+    def __call__(self, cubeHyperSpectal: CubeHyperSpectral, Lm: np.ndarray):
         mean = cubeHyperSpectal.mean
         if mean is None :
             raise ValueError('The hyperspectral image should have been preprocessed first with the call method in order to perform the PCA projection and to compute the mean value.')
-        self._Ync  = self.data.preprocess(Lm, mean)
-        return self._Ync
+        self.Ync  = self.preprocess(Lm, mean)
+        return self.Ync
 
-    def preprocess(self, Lm: np.array, mean: np.array) -> np.array:
+    def preprocess(self, Lm: np.ndarray, mean: np.ndarray) -> np.ndarray:
         """
         Performs preprocessing for the multispectral image. Needs the mean from the PCA decomposition performed on the hyperspectral image.
         :param Lm: the spectral operator retrieved from LM.fits
@@ -301,8 +326,9 @@ class CubeMultisSectral(Cube):
         #############################################
         #               Substracting the mean image
         #############################################
-        mean[:, 0] = mean[:, 0] * get_h_mean() # Applying the NirSpec PSF to the mean
-        Ync = np.reshape(Ync, (self.wave, self.x_multi * self.y_multi)) - np.dot(np.diag(Lm), mean)
+        wave, x_multi, y_multi = Ync.shape
+        mean[:, 0] = mean[:, 0] * get_h_mean(self.PSF_file) # Applying the NirCam PSF to the mean
+        Ync = np.reshape(Ync, (wave, x_multi * y_multi)) - np.dot(np.diag(Lm), mean)
 
         return Ync
 #self = objet lui meme
@@ -316,6 +342,14 @@ class CubeMultisSectral(Cube):
     : return: np.array    
    
     """
+
+    @property
+    def Ync(self):
+        return self.Ync
+
+    @Ync.setter
+    def Ync(self, value):
+        self._Ync = value
 #       YnirSpec = fits.getdata(HyperSpectral_Image)
 #        return YnirSpec
 #            @staticmethod
