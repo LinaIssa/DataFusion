@@ -95,7 +95,7 @@ def main(config: dict):
     ##############################################
     nr, nc = config["nr"], config["nc"]
 
-    myFusion = Weighted_Sobolev_Reg(cubeMultiSpectral, cubeHyperspectral, Lm, Lh, nc, nr)
+    myFusion = Weighted_Sobolev_Reg(cubeMultiSpectral, cubeHyperspectral, Lm, Lh, PSF_MS, PSF_HS, nc, nr)
     myFusion()
 
 if __name__ == "__main__":

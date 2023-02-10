@@ -1,8 +1,9 @@
-from datetime import time
+from time import time
 
 import numpy        as np
 import scipy.sparse as sp
-from typing import Union
+
+from numpy  import matlib
 from abc    import ABC, abstractmethod
 from tools  import get_h_band, get_g_band, aliasing_adj, _centered
 from Cube   import CubeHyperSpectral, CubeMultiSpectral
@@ -138,7 +139,7 @@ class Fusion(ABC):
         is called in the Ans function
 
         """
-        res = np.zeros(nr * nc * d ** 2, dtype=np.complex)
+        res = np.zeros(nr * nc * d ** 2, dtype=complex)
         lh = len(V)
         for m in range(lh):
             g = get_g_band(PSF_HS, m)
@@ -205,14 +206,16 @@ class Fusion(ABC):
 
         nf = Lm.shape[0]
         lh = V.shape[0]
-        res = np.zeros((nf, lacp, nr * nc), dtype=np.complex)
+        res = np.zeros((nf, lacp, nr * nc), dtype=complex)
         print(' *** PHV computation ***')
         for m in range(nf):
             for i in range(lacp):
-                sum_h = np.zeros(nr * nc, dtype=np.complex)
+                sum_h = np.zeros(nr * nc, dtype=complex)
                 for l in range(lh):
-                    sum_h += get_h_band(PSF_MS, l) * Lm[m, l] * V[l, i]
+                    PSF = get_h_band(PSF_MS, l)    # TODO PSF_image stored as a np.array in the initialisation
+                    sum_h[:PSF.shape[0]] += PSF * Lm[m, l] * V[l, i] # correction temporaire
                 res[m, i] = sum_h
+        print(' *** PHV computation done !! ***')
         return res
 
     def _Anc(self) -> np.array:
@@ -221,17 +224,17 @@ class Fusion(ABC):
 
         Computes the part of the matrix A related to the multi-spectral image. Called in MatrixA_data method
         """
-        nc   = self.nc
-        nr   = self.nr
+        nc = self.nc
+        nr = self.nr
         lacp = self.lacp
 
         t1 = time()
         row = np.arange(nr * nc)
-        row = np.matlib.repmat(row, 1, lacp ** 2)[0]
+        row = np.tile(row, (1, lacp ** 2))[0]
         for i in range(lacp):
             row[i * nr * nc * lacp:(i + 1) * nr * nc * lacp] += i * nr * nc
         col = np.arange(nr * nc * lacp)
-        col = np.matlib.repmat(col, 1, lacp)[0]
+        col = np.tile(col, (1, lacp))[0]
 
         phv = self._PHV(lacp, self.Lm, self.V, nr, nc, self.PSF_MS)
         mat = np.reshape(np.reshape(np.arange(lacp ** 2), (lacp, lacp)).T, lacp ** 2)
@@ -268,15 +271,15 @@ class Fusion(ABC):
         t1 = time()
         ntn = self._nTn_sparse(nr, nc, d)
         V = np.dot(np.diag(Lh), self.V)
-        row = np.matlib.repmat(ntn.row, 1, lacp ** 2)[0]
+        row = np.tile(ntn.row, (1, lacp ** 2))[0]
         for i in range(lacp):
             row[i * nr * nc * lacp * d ** 2:(i + 1) * nr * nc * lacp * d ** 2] += i * nr * nc
         col = np.zeros(nr * nc * d ** 2 * lacp)
         for i in range(lacp):
             col[i * nr * nc * d ** 2:(i + 1) * nr * nc * d ** 2] = ntn.col + i * nr * nc
-        col = np.matlib.repmat(col, 1, lacp)[0]
+        col = np.tile(col, (1, lacp))[0]
         mat = np.reshape(np.reshape(np.arange(lacp ** 2), (lacp, lacp)).T, lacp ** 2)
-        data = np.zeros((lacp ** 2, nr * nc * d ** 2), dtype=np.complex)
+        data = np.zeros((lacp ** 2, nr * nc * d ** 2), dtype=complex)
         for i in range(lacp):
             # print('i='+str(i))
             for j in range(lacp - i):
@@ -296,7 +299,7 @@ class Fusion(ABC):
         return ans
 
 
-    def preprocess_spatial_regularisation(self) -> Union[tuple, tuple]:
+    def preprocess_spatial_regularisation(self) -> tuple[np.ndarray, np.ndarray]:
         """
         @author Lina Issa, adapted from Claire Guilloteau's FROMHAGE
 
@@ -431,8 +434,13 @@ class Fusion(ABC):
     def MatrixC_data(self) -> np.array:
 
         Ym, Yh = self.Y_multi, self.Y_hyper
+
+        Ym = np.reshape(Ym, np.prod(Ym.shape))  # to be consistent with the output of set inputs
+        Yh = np.reshape(Yh, np.prod(Yh.shape))  # to be consistent with the output of set inputs
+
         cm = 0.5 * self.sbnc * np.dot(np.conj(Ym).T, Ym)
         ch = 0.5 * self.sbns * np.dot(np.conj(Yh).T, Yh)
+
         C = cm + ch
 
         return C
@@ -447,18 +455,18 @@ class Fusion(ABC):
         return Zfusion
 
 class Weighted_Sobolev_Reg(Fusion):
-    def __init__(self, cubeMultiSpectral: CubeMultiSpectral, cubeHyperSpectral: CubeHyperSpectral, Lm: np.ndarray,
-                 Lh: np.ndarray,
-                 nc: int, nr: int) -> None:
-        super().__init__(cubeMultiSpectral, cubeHyperSpectral, Lm, nc, nr, mu=10)
+    def __init__(self, cubeMultiSpectral: CubeMultiSpectral, cubeHyperSpectral: CubeHyperSpectral,
+                 Lm: np.ndarray, Lh: np.ndarray,
+                 PSF_MS : str, PSF_HS : str,
+                 nc: int, nr: int, ) -> None:
+        super().__init__(cubeMultiSpectral, cubeHyperSpectral, Lm, PSF_MS, PSF_HS, nc, nr, mu=10)
         # Linear System
-
+        print("Constructing the linear system : ")
         self.A = self.MatrixA_data(Lh)
         self.B = self.MatrixB_data(Lh)
         self.C = self.MatrixC_data()
 
-    @abstractmethod
-    def spatial_regularisation(self, D: np.ndarray, Wd:np.ndarray, Z:np.ndarray) -> np.array:
+    def spatial_regularisation(self, D: np.ndarray, Wd: np.ndarray, Z: np.ndarray) -> np.array:
         """
         Constructs the regularisation part of the matrix A. Needs D and Wd from the preprocessing
         :param D :  as computed by the spatial regularisation preprocessing
@@ -466,15 +474,33 @@ class Weighted_Sobolev_Reg(Fusion):
         :param Z :  the reduced hyperspectral image computed by the PCA. The value of Z chang
         :return: Areg, the part of the matrix A that contains the regularisation information
         """
-        Z = np.reshape(Z, np.prod(Z.shape))
-        Z = np.reshape(Z, (self.lacp, Wd[0].shape[1], Wd[0].shape[2]))
-        gx = np.fft.fft2(np.real(np.fft.ifft2(Z * D[0])) * Wd[0] ** 2, norm='ortho') * np.conj(D[0])
-        gy = np.fft.fft2(np.real(np.fft.ifft2(Z * D[1])) * Wd[1] ** 2, norm='ortho') * np.conj(D[1])
-        Areg = 2 * self.mu * np.reshape(gx + gy, np.prod(gx.shape))
+        Z = np.reshape(
+            Z,
+            (self.lacp, Wd[0].shape[1], Wd[0].shape[2])
+        )
+
+        gx = np.fft.fft2(
+            np.real(
+                np.fft.ifft2(
+                    Z * D[0]
+                )
+            ) * Wd[0] ** 2,
+            norm='ortho') * np.conj(D[0])
+
+        gy = np.fft.fft2(
+            np.real(
+                np.fft.ifft2(
+                    Z * D[1]
+                )
+            ) * Wd[1] ** 2,
+            norm='ortho') * np.conj(D[1])
+
+        Areg = 2 * self.mu * np.reshape(gx + gy,
+                                        np.prod(gx.shape)
+                                        )
         return Areg
 
-    @abstractmethod
-    def conjugate_gradient(self, A, D, Wd, B, C, Z, save_it=False) -> Union[np.array, np.array]:
+    def conjugate_gradient(self, A, D, Wd, B, C, Z, save_it=False) -> tuple[np.ndarray, list]:
         """
         :param A: the vectorized data-driven A from MatrixA_data class method.
         :param D: the operator of finite differences from the spatial regularisation preprocess method
@@ -499,9 +525,16 @@ class Weighted_Sobolev_Reg(Fusion):
         r = A.dot(Z) + B + self.spatial_regularisation(D, Wd, Z)
         p = -r.copy()
         # Objective function
-        obj = [0.5 * np.dot(np.conj(Z).T, A.dot(Z)) + np.dot(np.conj(B.T), Z) + C + 0.5 * np.dot(np.conj(Z).T,
-                                                                                                 self.spatial_regularisation(
-                                                                                                     D, Wd, Z))]
+        obj = [
+            0.5 * np.dot(
+                np.conj(Z).T, A.dot(Z)
+            ) + np.dot(
+                np.conj(B.T), Z
+            ) + C + 0.5 * np.dot(
+                np.conj(Z).T,
+                self.spatial_regularisation(D, Wd, Z)
+            )
+        ]
         print(str(nb_it) + ' -- Objective function value : ' + str(obj[nb_it]))
         ########## Control procedure ##########
         if np.isnan(obj):
@@ -525,9 +558,16 @@ class Weighted_Sobolev_Reg(Fusion):
             beta = np.dot(np.conj(r).T, r) / np.dot(np.conj(r_old).T, r_old)
             p = -r + beta * p
             nb_it += 1
-            obj.append(0.5 * np.dot(np.conj(Z).T, A.dot(Z)) + np.dot(np.conj(B.T), Z) + C + 0.5 * np.dot(np.conj(Z).T,
-                                                                                                         self.spatial_regularisation(
-                                                                                                             D, Wd, Z)))
+            obj.append(
+                0.5 * np.dot(
+                    np.conj(Z).T, A.dot(Z)
+                ) + np.dot(
+                    np.conj(B.T), Z
+                ) + C + 0.5 * np.dot(
+                    np.conj(Z).T,
+                    self.spatial_regularisation(D, Wd, Z)
+                )
+            )
             print(str(nb_it) + ' -- Objective function value : ' + str(obj[nb_it]))
             stop = (obj[-2] - obj[-1]) / obj[-2]
             # if save_it:
@@ -539,14 +579,20 @@ class Weighted_Sobolev_Reg(Fusion):
 
         return Z, obj
 
-    def __call__(self) -> Union[np.array, list]:
+    def __call__(self) -> tuple[np.ndarray, list]:
         # Linear System
         A = self.A
         B = self.B
         C = self.C
-        Z = self.Z.copy()
+        Z = np.reshape(                 # to be consistent with the output of Z in set_inputs of FRHOMAGE
+            self.Z,
+            np.prod(self.Z.shape)
+        )
+        print("Spatial Regularisation Implementation : ")
         D, Wd = self.preprocess_spatial_regularisation()
+        print("Conjugate Gradient procedure : ")
         Zfusion, obj = self.conjugate_gradient(A, D, Wd, B, C, Z)
+        print("Postprocessing og the product function")
         Zfusion = self.postprocess(Zfusion)
         return Zfusion, obj
 
