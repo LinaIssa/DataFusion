@@ -1,5 +1,5 @@
 from time import time
-
+import sys
 import numpy        as np
 import scipy.sparse as sp
 
@@ -139,6 +139,7 @@ class Fusion(ABC):
         is called in the Ans function
 
         """
+        print("Starting spatial PSF computation")
         res = np.zeros(nr * nc * d ** 2, dtype=complex)
         lh = len(V)
         for m in range(lh):
@@ -206,14 +207,15 @@ class Fusion(ABC):
 
         nf = Lm.shape[0]
         lh = V.shape[0]
+
         res = np.zeros((nf, lacp, nr * nc), dtype=complex)
         print(' *** PHV computation ***')
         for m in range(nf):
             for i in range(lacp):
                 sum_h = np.zeros(nr * nc, dtype=complex)
                 for l in range(lh):
-                    PSF = get_h_band(PSF_MS, l)    # TODO PSF_image stored as a np.array in the initialisation
-                    sum_h[:PSF.shape[0]] += PSF * Lm[m, l] * V[l, i] # correction temporaire
+                    PSF_spatial = get_h_band(PSF_MS, l)    # TODO PSF_image stored as a np.array in the initialisation
+                    sum_h += PSF_spatial * Lm[m, l] * V[l, i] # correction temporaire
                 res[m, i] = sum_h
         print(' *** PHV computation done !! ***')
         return res
@@ -592,7 +594,7 @@ class Weighted_Sobolev_Reg(Fusion):
         D, Wd = self.preprocess_spatial_regularisation()
         print("Conjugate Gradient procedure : ")
         Zfusion, obj = self.conjugate_gradient(A, D, Wd, B, C, Z)
-        print("Postprocessing og the product function")
+        print("Postprocessing of the product function")
         Zfusion = self.postprocess(Zfusion)
         return Zfusion, obj
 
