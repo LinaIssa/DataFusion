@@ -45,9 +45,11 @@ def load_config(filename):
     return config
 
 
-def main(config: dict):
+def main(config: dict, first_run : bool = True):
     """
     :param config : the parameter dictionary loaded automatically by running main.py
+    :param first_run : boolean by default True. The first run computes the matrix A, B C and performs the spectral
+     reduction and stores them so that they can be loaded for the other runs, assuming that the same images are fused.
     :return Zfusion : the fusion product
     :return obj :  the objective function
     """
@@ -66,8 +68,8 @@ def main(config: dict):
     YnirCam = fits.getdata(datafiles["multi_image"])
     Lh = fits.getdata(SpectralDegradationFiles["Lh"])
     Lm = fits.getdata(SpectralDegradationFiles["Lm"])
-    # TODO sanity check on the dimension of the images
-    # TODO sanity check on the dimensions of Lm and Lh
+    # TODO check on the dimension of the images
+    # TODO check on the dimensions of Lm and Lh
     if not isinstance(YnirSpec, np.ndarray):
         raise TypeError(f'The hyperspectral image stored in {config["hyper_image"]} could not be stored in a numpy '
                         f'array')
@@ -82,10 +84,26 @@ def main(config: dict):
     fluxConv     = config["FLUXCONV_NC"]
     PSF_HS = config["PSF_HS"]
     PSF_MS = config["PSF_MS"]
+    PSF_HS_data = fits.getdata(PSF_HS)
+    PSF_MS_data = fits.getdata(PSF_MS)
+
+
+    #if not PSF_HS_data.shape[2] == PSF_HS_data.shape[3] and PSF_MS_data.shape[2] == PSF_MS_data.shape[3]:
+    #    raise TypeError(f' The given PSF a ')
+    #if not PSF_HS_data.shape[2] == PSF_MS_data.shape[2]:
+    #    raise TypeError
+
+    if not config["nr"] * config["nc"] == PSF_MS_data.shape[2] * PSF_MS_data.shape[3]:
+        raise ValueError(f'There is a decrepancy between the value of (nr, nc) and that of the spatial dimensions of '
+                         f'the PSF that is {PSF_MS_data.shape[2]} x {PSF_MS_data.shape[3]}')
+
+    # TODO questionning the user to make sure that the same scene and PSF are used as for the first run                                                                                                                                                                                                   SF
 
 
     cubeHyperspectral = CubeHyperSpectral(YnirSpec, YnirCam, fact_pad,  downsampling, fluxConv, PSF_HS, lacp)
     cubeHyperspectral(Lh)
+
+    np.savez(config["OutputDir"] + 'Z.npz', format=type(cubeHyperspectral.Z), data=cubeHyperspectral.Z)
 
     cubeMultiSpectral = CubeMultiSpectral(YnirCam, fact_pad, PSF_MS)
     cubeMultiSpectral(cubeHyperspectral, Lm)
@@ -95,8 +113,24 @@ def main(config: dict):
     ##############################################
     nr, nc = config["nr"], config["nc"]
 
-    myFusion = Weighted_Sobolev_Reg(cubeMultiSpectral, cubeHyperspectral, Lm, Lh, PSF_MS, PSF_HS, nc, nr)
-    myFusion()
+    myFusion = Weighted_Sobolev_Reg(cubeMultiSpectral, cubeHyperspectral, Lm, Lh, PSF_MS, PSF_HS, nc, nr,
+                                    output_dir=config["OutputDir"], first_run=False)
+    myFusion(save_it=False)
+
+
+"""
+    if first_run == False :
+        answer = input("Are you using exactly the same images and the same PSFs of NirCam and NirSpec instruments as "
+                       "for the first run? Answer YES or NO")
+        if answer == "YES" :
+            print("Great !")
+            # TODO write the fusion call with A, B and C being loaded instead of computed
+
+        if answer == "NO" :
+            print("Then you should set first_run as True")
+        else:
+            print('The answer should be YES or NO')
+"""
 
 if __name__ == "__main__":
     config = load_config('config.yaml')

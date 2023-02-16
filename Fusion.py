@@ -1,5 +1,8 @@
 from time import time
+import os.path
 import sys
+import h5py
+import pickle
 import numpy        as np
 import scipy.sparse as sp
 
@@ -7,6 +10,7 @@ from numpy  import matlib
 from abc    import ABC, abstractmethod
 from tools  import get_h_band, get_g_band, aliasing_adj, _centered
 from Cube   import CubeHyperSpectral, CubeMultiSpectral
+from astropy.io import fits
 
 
 class Fusion(ABC):
@@ -139,7 +143,6 @@ class Fusion(ABC):
         is called in the Ans function
 
         """
-        print("Starting spatial PSF computation")
         res = np.zeros(nr * nc * d ** 2, dtype=complex)
         lh = len(V)
         for m in range(lh):
@@ -155,6 +158,7 @@ class Fusion(ABC):
 
         is called in the Ans function
         """
+        print("Starting sparse computation : ")
         n1 = sp.identity(nc // d)
         n2_ = n1.copy()
         for i in range(d - 1):
@@ -171,6 +175,8 @@ class Fusion(ABC):
         n4 = n4_.copy()
         for i in range(d - 1):
             n4 = sp.vstack((n4, n4_))
+        print("Sparse computation done !")
+
         return n4
 
     @staticmethod
@@ -282,6 +288,7 @@ class Fusion(ABC):
         col = np.tile(col, (1, lacp))[0]
         mat = np.reshape(np.reshape(np.arange(lacp ** 2), (lacp, lacp)).T, lacp ** 2)
         data = np.zeros((lacp ** 2, nr * nc * d ** 2), dtype=complex)
+        print("Starting spatial PSF computation for NirSpec image")
         for i in range(lacp):
             # print('i='+str(i))
             for j in range(lacp - i):
@@ -385,7 +392,7 @@ class Fusion(ABC):
         #######################################
 
         A_data = A_multi + A_hyper
-
+        print("data-driven and PSF-dependant A computed")
         return A_data
 
     def MatrixB_data(self, Lh: np.ndarray) -> np.array:
@@ -413,7 +420,7 @@ class Fusion(ABC):
 
         bnc = np.dot(Lm.T, Ym)
         for l in range(lh):
-            bnc[l] = get_h_band( self.PSF_MS, l, mode='adj') * bnc[l]
+            bnc[l] = get_h_band(self.PSF_MS, l, mode='adj') * bnc[l]
         bnc = np.dot(self.V.T, bnc)
         ###########################################
         #               Hyperspectral Part        #
@@ -431,6 +438,9 @@ class Fusion(ABC):
 
         B_data = bm + bh
 
+        print("data-driven and PSF-dependant B computed")
+
+
         return B_data
 
     def MatrixC_data(self) -> np.array:
@@ -445,10 +455,13 @@ class Fusion(ABC):
 
         C = cm + ch
 
+        print("data-driven matrix C computed")
+
         return C
 
-    def postprocess(self, Zfusion: np.ndarray) -> np.array:  # a mettre dans le module Cube.py ?
+    def postprocess(self, Zfusion: np.ndarray) -> np.array:
 
+        print("Postprocessing the product fusion : ")
         Zfusion = np.reshape(Zfusion, (self.lacp, self.nr, self.nc))
         Zfusion = np.fft.ifft2(Zfusion, norm='ortho')
         Zfusion = np.real(
@@ -460,13 +473,35 @@ class Weighted_Sobolev_Reg(Fusion):
     def __init__(self, cubeMultiSpectral: CubeMultiSpectral, cubeHyperSpectral: CubeHyperSpectral,
                  Lm: np.ndarray, Lh: np.ndarray,
                  PSF_MS : str, PSF_HS : str,
-                 nc: int, nr: int, ) -> None:
+                 nc: int, nr: int, output_dir : str , first_run : bool = True) -> None:
         super().__init__(cubeMultiSpectral, cubeHyperSpectral, Lm, PSF_MS, PSF_HS, nc, nr, mu=10)
+        self.outputDir = output_dir
         # Linear System
-        print("Constructing the linear system : ")
-        self.A = self.MatrixA_data(Lh)
-        self.B = self.MatrixB_data(Lh)
-        self.C = self.MatrixC_data()
+        if first_run is True :
+
+            print("Constructing the linear system : ")
+
+            self.A = self.MatrixA_data(Lh)
+            self.B = self.MatrixB_data(Lh)
+            self.C = self.MatrixC_data()
+
+            with open(os.path.join(output_dir, 'A.dat'), 'wb') as f:
+                pickle.dump(self.A, f)
+            with open(os.path.join(output_dir, 'B.dat'), 'wb') as f:
+                pickle.dump(self.B, f)
+            with open(os.path.join(output_dir, 'C.dat'), 'wb') as f:
+                pickle.dump(self.C, f)
+
+        else :
+
+            print("Loading the pre-computed linear system")
+
+            with open(os.path.join(output_dir, 'A.dat'), 'rb') as f:
+                self.A = pickle.load(f)
+            with open(os.path.join(output_dir, 'B.dat'), 'rb') as f:
+                self.B = pickle.load(f)
+            with open(os.path.join(output_dir, 'C.dat'), 'rb') as f:
+                self.C = pickle.load(f)
 
     def spatial_regularisation(self, D: np.ndarray, Wd: np.ndarray, Z: np.ndarray) -> np.array:
         """
@@ -572,17 +607,20 @@ class Weighted_Sobolev_Reg(Fusion):
             )
             print(str(nb_it) + ' -- Objective function value : ' + str(obj[nb_it]))
             stop = (obj[-2] - obj[-1]) / obj[-2]
-            # if save_it:
-            #    hdu = fits.PrimaryHDU(self._postprocess(Z))
-            #    hdu.writeto(SAVE + 'control/z_ah0_' + str(nb_it + 1) + 'mu' + str(self.mu) + '.fits', overwrite=True)
 
         t2 = time()
         print('Cg Computation time : ' + str(np.round((t2 - t1) / 60)) + 'min ' + str(np.round((t2 - t1) % 60)) + 's.')
 
         return Z, obj
 
-    def __call__(self) -> tuple[np.ndarray, list]:
+    def __call__(self, save_it : bool = False, **kwargs) -> tuple[np.ndarray, list]:
+        """
+        @author Lina Issa
+
+        :param save_it: by default the product fusion is not saved.
+        """
         # Linear System
+        mu = self.mu
         A = self.A
         B = self.B
         C = self.C
@@ -596,6 +634,12 @@ class Weighted_Sobolev_Reg(Fusion):
         Zfusion, obj = self.conjugate_gradient(A, D, Wd, B, C, Z)
         print("Postprocessing of the product function")
         Zfusion = self.postprocess(Zfusion)
+
+        if save_it is True :
+
+            hdu = fits.PrimaryHDU(Zfusion)
+            hdu.writeto(os.path.join(self.outputDir, f'Zfusion_{mu}.fits'), overwrite=True)
+
         return Zfusion, obj
 
     # def __call__(self, regP =[], regKw = {},
