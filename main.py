@@ -19,8 +19,15 @@ warnings.filterwarnings('ignore')
 Before running main.py, you should create or update a configuration file config.yaml in which all the important 
 parameters used in this code are stored. This configuration file can be created with the module create_ConfigFile.py 
 where we give the description of the parameters.
+Then, the datacubes should be instantiated as Cube objects from Cube.py in which all the needed preprocessing takes 
+place. 
+ 
+By construction, regularisation methods are class objects with a set of attributes and methods. They can be found in 
+Fusion.py. The chosen regularisation method needs to be instantiated so that the fusion code is performed with the 
+embedded call method.
 
-Running the main function will launch the fusion procedure accordingly to the chosen regularisation.  
+By default, this main will launch the weighted sobolev regularisation.  
+
 """
 
 def load_config(filename):
@@ -45,47 +52,68 @@ def load_config(filename):
     return config
 
 
-def main(config: dict, first_run : bool = True):
+def main(config: dict):
     """
     :param config : the parameter dictionary loaded automatically by running main.py
-    :param first_run : boolean by default True. The first run computes the matrix A, B C and performs the spectral
-     reduction and stores them so that they can be loaded for the other runs, assuming that the same images are fused.
+
     :return Zfusion : the fusion product
     :return obj :  the objective function
     """
     print('Launching Fusion with Regularization Of Hyper and Multi-spectral imAGEs')
 
-    ##############################################
-    #              Data Loading                  #
-    ##############################################
+    ####################################################################################################################
+    #                                               Data Loading & Preprocessing                                       #
+    ####################################################################################################################
 
-    datafiles = {"hyper_image": config["hyper_image"],
-                 "multi_image": config["multi_image"]}
+    datafiles                = {"hyper_image": config["hyper_image"],
+                                "multi_image": config["multi_image"]}
+
     SpectralDegradationFiles = {"Lh" : config["LH"],
-                              "Lm" : config["LM"]}
+                                "Lm" : config["LM"]}
 
-    YnirSpec = fits.getdata(datafiles["hyper_image"])
-    YnirCam = fits.getdata(datafiles["multi_image"])
-    Lh = fits.getdata(SpectralDegradationFiles["Lh"])
-    Lm = fits.getdata(SpectralDegradationFiles["Lm"])
-    # TODO check on the dimension of the images
-    # TODO check on the dimensions of Lm and Lh
+    PSF_files                = {"PSF_HS" : config["PSF_HS"],
+                                "PSF_MS" : config["PSF_MS"]}
+
+    YnirSpec    = fits.getdata(datafiles["hyper_image"])
+    YnirCam     = fits.getdata(datafiles["multi_image"])
+    Lh          = fits.getdata(SpectralDegradationFiles["Lh"])
+    Lm          = fits.getdata(SpectralDegradationFiles["Lm"])
+    PSF_HS_data = fits.getdata(PSF_files["PSF_HS"])
+    PSF_MS_data = fits.getdata(PSF_files["PSF_MS"])
+
     if not isinstance(YnirSpec, np.ndarray):
         raise TypeError(f'The hyperspectral image stored in {config["hyper_image"]} could not be stored in a numpy '
                         f'array')
+
     if not isinstance(YnirCam, np.ndarray):
         raise TypeError(f'The multi-spectral image stored in {config["multi_image"]} could not be stored in a numpy '
                         f'array')
+
+    if not Lm.shape[1] == Lh.shape[0] :
+        raise TypeError(f'The given spectral operators  do not have matching size. The number of bands in the operator '
+                        f'for the hyperspectral image ({Lh.shape[0]}) does not match that of the multi-spectral image '
+                        f'({Lm.shape[1]}).')
+
+    if not Lm.shape[0] == YnirCam.shape[0] or Lh.shape[0] == YnirSpec.shape[0]:
+        raise TypeError(f'Either the number of bands in the multi-spectral image ({YnirCam.shape[0]}) does not '
+                        f'correspond to that in the associated operator Lm ({Lm.shape[0]}) or the number of bands in'
+                        f' the hyperspectral image ({YnirSpec.shape[0]}) is not in adequacy with that in the '
+                        f'corresponding operator Lh ({Lh.shape[0]}).')
+
+
+
+
     l_h, pix1_h, pix2_h = YnirSpec.shape
     l_m, pix1_m, pix2_m = YnirCam.shape
-    lacp = config["lacp"]
-    fact_pad = config["fact_pad"]
+
+    lacp         = config["lacp"]
+    fact_pad     = config["fact_pad"]
     downsampling = config["downsampling"] # sous echantillonage
     fluxConv     = config["FLUXCONV_NC"]
-    PSF_HS = config["PSF_HS"]
-    PSF_MS = config["PSF_MS"]
-    PSF_HS_data = fits.getdata(PSF_HS)
-    PSF_MS_data = fits.getdata(PSF_MS)
+
+    PSF_HS = PSF_files["PSF_HS"] # path to PSF_HS file
+    PSF_MS = PSF_files["PSF_MS"] # path to PSF_MS file
+
 
 
     #if not PSF_HS_data.shape[2] == PSF_HS_data.shape[3] and PSF_MS_data.shape[2] == PSF_MS_data.shape[3]:
@@ -94,27 +122,37 @@ def main(config: dict, first_run : bool = True):
     #    raise TypeError
 
     if not config["nr"] * config["nc"] == PSF_MS_data.shape[2] * PSF_MS_data.shape[3]:
-        raise ValueError(f'There is a decrepancy between the value of (nr, nc) and that of the spatial dimensions of '
+        raise ValueError(f'There is a discrepancy between the value of (nr, nc) and that of the spatial dimensions of '
                          f'the PSF that is {PSF_MS_data.shape[2]} x {PSF_MS_data.shape[3]}')
 
-    # TODO questionning the user to make sure that the same scene and PSF are used as for the first run                                                                                                                                                                                                   SF
 
+    cubeHyperspectral = CubeHyperSpectral(YnirSpec, YnirCam,
+                                          fact_pad,  downsampling,
+                                          fluxConv, PSF_HS, lacp)
 
-    cubeHyperspectral = CubeHyperSpectral(YnirSpec, YnirCam, fact_pad,  downsampling, fluxConv, PSF_HS, lacp)
     cubeHyperspectral(Lh)
 
-    np.savez(config["OutputDir"] + 'Z.npz', format=type(cubeHyperspectral.Z), data=cubeHyperspectral.Z)
+    #np.savez(config["OutputDir"] + 'Z.npz', format=type(cubeHyperspectral.Z), data=cubeHyperspectral.Z)
 
     cubeMultiSpectral = CubeMultiSpectral(YnirCam, fact_pad, PSF_MS)
+
     cubeMultiSpectral(cubeHyperspectral, Lm)
 
-    ##############################################
-    #              Data Fusion                   #
-    ##############################################
-    nr, nc = config["nr"], config["nc"]
+    ####################################################################################################################
+    #                                                       Data Fusion                                                #
+    ####################################################################################################################
 
-    myFusion = Weighted_Sobolev_Reg(cubeMultiSpectral, cubeHyperspectral, Lm, Lh, PSF_MS, PSF_HS, nc, nr,
-                                    output_dir=config["OutputDir"], first_run=False)
+    mu        = config['mu']
+    nr, nc    = config["nr"], config["nc"]
+    outputDir = config["OutputDir"]
+
+    myFusion = Weighted_Sobolev_Reg(cubeMultiSpectral, cubeHyperspectral,
+                                    Lm, Lh,
+                                    PSF_MS, PSF_HS,
+                                    nc, nr,
+                                    outputDir,
+                                    mu, first_run=False)
+
     myFusion(save_it=False)
 
 

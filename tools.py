@@ -10,7 +10,6 @@ import numpy as np
 from astropy.io import fits
 from skimage.transform import resize
 import cmath
-from main import config
 ########################### Convolution functions #############################
 
 
@@ -56,8 +55,8 @@ def _centered(arr, newshape):
     return arr[tuple(myslice)]
 
 
-def convolve_nc(X, H, mode='direct'): # not used
-    npix = config["fact_pad"]
+def convolve_nc(X, H, fact_padding : int, mode='direct'): # not used
+    npix = fact_padding
     Y = compute_symmpad(X, npix)
     Yfft = np.fft.rfft2(Y)
     if 'adj' in mode:
@@ -98,7 +97,7 @@ def fft_ns_ac(tabwave): # not used
 
 def compute_translation(sh): # not used anywhere
     K, L = sh
-    trans = np.zeros(sh, dtype=np.complex)
+    trans = np.zeros(sh, dtype=complex)
     for k in range(K):
         for l in range(L):
             trans[k, l] = cmath.exp(-2*np.pi*k*(1/2)*1.j)*cmath.exp(-2*np.pi*l*(1/2)*1.j)
@@ -117,7 +116,7 @@ def save_trans(trans, name): # not used
 def get_trans(name): # used in convolve_nc and convolve_ns
     t = fits.getdata('/usr/local/home/cguillot3/Ech_fraction/trans_'+name+'.fits')
     L, M, N = t.shape()
-    trans = np.zeros((M, N), dtype=np.complex)
+    trans = np.zeros((M, N), dtype=complex)
     trans = t[0]+t[1]*1.j
     return trans
 
@@ -154,7 +153,7 @@ def subsample(X): #  used only in produce_HS_MS.py
 
 def get_psf_ns(i):  #not used anywhere
     i_ = fits.getdata('/usr/local/home/cguillot3/Ech_fraction/G_fft_1.fits').shape[0]//2+i
-    g = np.array(fits.getdata('/usr/local/home/cguillot3/Ech_fraction/G_fft_1.fits')[i]+fits.getdata('/usr/local/home/cguillot3/Ech_fraction/G_fft_1.fits')[i_]*1.j, dtype=np.complex_)
+    g = np.array(fits.getdata('/usr/local/home/cguillot3/Ech_fraction/G_fft_1.fits')[i]+fits.getdata('/usr/local/home/cguillot3/Ech_fraction/G_fft_1.fits')[i_]*1.j, dtype=complex)
 #    i_=fits.getdata('/Users/cguillot/Documents/Ech_fraction/G_fft.fits').shape[0]//2+i
 #    g=np.array(fits.getdata('/Users/cguillot/Documents/Ech_fraction/G_fft.fits')[i]+fits.getdata('/Users/cguillot/Documents/Ech_fraction/G_fft.fits')[i_]*1.j,dtype=np.complex_)
     return g
@@ -162,46 +161,42 @@ def get_psf_ns(i):  #not used anywhere
 
 def get_psf_nc(i):  #not used anywhere
     i_ = fits.getdata('/usr/local/home/cguillot3/Ech_fraction/H_fft_1.fits').shape[0]//2+i
-    h = np.array(fits.getdata('/usr/local/home/cguillot3/Ech_fraction/H_fft_1.fits')[i]+fits.getdata('/usr/local/home/cguillot3/Ech_fraction/H_fft_1.fits')[i_]*1.j, dtype=np.complex_)
+    h = np.array(fits.getdata('/usr/local/home/cguillot3/Ech_fraction/H_fft_1.fits')[i]+fits.getdata('/usr/local/home/cguillot3/Ech_fraction/H_fft_1.fits')[i_]*1.j, dtype=complex)
 #    i_=fits.getdata('/Users/cguillot/Documents/Ech_fraction/H_fft.fits').shape[0]//2+i
 #    h=np.array(fits.getdata('/Users/cguillot/Documents/Ech_fraction/H_fft.fits')[i]+fits.getdata('/Users/cguillot/Documents/Ech_fraction/H_fft.fits')[i_]*1.j,dtype=np.complex_)
     return h
 
 
-def get_h(mode='direct'):  #not used anywhere
+def get_h(PSF_MS : str, mode='direct'):  #not used anywhere
     # h_ = fits.getdata('H_fft_1.fits')
     # h_ = fits.getdata('/usr/local/home/cguillot3/SAM20/EXPE/H_fft.fits')
-    h_ = fits.getdata(config["PSF_MS"])  #TODO: added PSFs in CONSTANTS
+    h_ = fits.getdata(PSF_MS)
     k, l, m, n = h_.shape
-    h = np.zeros((l, m, n), dtype=np.complex)
+    h = np.zeros((l, m, n), dtype=complex)
     h = h_[0]+h_[1]*1.j
     if 'adj' in mode:
         h = np.conj(h)
     return np.reshape(h, (l, m*n))
 
 
-def get_h_mean(mode='direct'):
+def get_h_mean(PSF_MS: str, mode='direct'):
     # h_ = fits.getdata(PSF+'H_fft_1.fits')[:, :, 0, 0]
     # h_ = fits.getdata('/usr/local/home/cguillot3/SAM20/EXPE/H_fft.fits')[:, :, 0, 0]
     # h_ = fits.getdata(DATA+'H_fft.fits')[:, :, 0, 0]
-    h_ = fits.getdata(config["PSF_MS"])[:, :, 0, 0]
+    h_ = fits.getdata(PSF_MS)[:, :, 0, 0]
     # h_=fits.getdata('/usr/local/home/cguillot3/Fourier_Res/H_fft.fits')[:,:,0,0]
     k, l = h_.shape
-    h = np.zeros((l), dtype=np.complex)
+    h = np.zeros((l), dtype=complex)
     h = h_[0]+h_[1]*1.j
     if 'adj' in mode:
         h = np.conj(h)
     return h
 
 
-def get_h_band(band, mode='direct'):
-    # h_ = fits.getdata(PSF+'H_fft_1.fits')[:, band]
-    # h_ = fits.getdata('/usr/local/home/cguillot3/SAM20/EXPE/H_fft.fits')[:, band]
-    # h_ = fits.getdata(DATA+'H_fft.fits')[:, band]
-    h_ = fits.getdata(config["PSF_MS"])[:, band]  #PSF_MS is defined in CONSTANTS
-    # h_=fits.getdata('/usr/local/home/cguillot3/Fourier_Res/H_fft.fits')[:,band]
+def get_h_band(PSF_MS : str, band, mode='direct'):
+    h_ = fits.getdata(PSF_MS)[:, band]  #PSF_MS is defined in CONSTANTS
     k, m, n = h_.shape
-    h = np.zeros((m, n), dtype=np.complex)
+    #h = np.zeros((m, n), dtype=complex)
     h = h_[0]+h_[1]*1.j
     if 'adj' in mode:
         h = np.conj(h)
@@ -214,48 +209,48 @@ def get_h_bands(lh, l_1000, mode='direct'): #not used anywhere
     else:
         h_ = fits.getdata('H_fft_1.fits')[:, l_1000*1000:(l_1000+1)*1000]
     k, l, m, n = h_.shape
-    h = np.zeros((l, m, n), dtype=np.complex)
+    h = np.zeros((l, m, n), dtype=complex)
     h = h_[0]+h_[1]*1.j
     if 'adj' in mode:
         h = np.conj(h)
     return np.reshape(h, (l, m*n))
 
 
-def get_g(mode='direct'): # not used anywhere
+def get_g(PSF_HS : str, mode='direct'): # not used anywhere
     # g_=fits.getdata('/usr/local/home/cguillot3/Fourier_Res/G_fft.fits')
     # g_ = fits.getdata('G_fft_1.fits')
     # g_ = fits.getdata('/usr/local/home/cguillot3/SAM20/EXPE/G_fft.fits')
-    g_ = fits.getdata(config["PSF_HS"])  #TODO: added PSFs in CONSTANTS
+    g_ = fits.getdata(PSF_HS)
     k, l, m, n = g_.shape
-    g = np.zeros((l, m, n), dtype=np.complex)
+    g = np.zeros((l, m, n), dtype=complex)
     g = g_[0]+g_[1]*1.j
     if 'adj' in mode:
         g = np.conj(g)
     return np.reshape(g, (l, m*n))
 
 
-def get_g_mean(mode='direct'):
+def get_g_mean(PSF_HS: str, mode='direct'):
     # g_ = fits.getdata(PSF+'G_fft_1.fits')[:, :, 0, 0]
     # g_=fits.getdata('/usr/local/home/cguillot3/Fourier_Res/G_fft.fits')[:,:,0,0]
     # g_ = fits.getdata('/usr/local/home/cguillot3/SAM20/EXPE/G_fft.fits')[:,:,0,0]
     # g_ = fits.getdata(DATA+'G_fft.fits')[:,:,0,0]
-    g_ = fits.getdata(config["PSF_HS"])[:,:,0,0]  #TODO: added PSFs in CONSTANTS
+    g_ = fits.getdata(PSF_HS)[:,:,0,0]
     k, l = g_.shape
-    g = np.zeros((l), dtype=np.complex)
+    g = np.zeros((l), dtype=complex)
     g = g_[0]+g_[1]*1.j
     if 'adj' in mode:
         g = np.conj(g)
     return g
 
 
-def get_g_band(band, mode='direct'):
+def get_g_band(PSF_HS: str, band, mode='direct'):
     # g_ = fits.getdata(PSF+'G_fft_1.fits')[:, band]
     # g_=fits.getdata('/usr/local/home/cguillot3/Fourier_Res/G_fft.fits')[:,band]
     # g_ = fits.getdata('/usr/local/home/cguillot3/SAM20/EXPE/G_fft.fits')[:,band]
     # g_ = fits.getdata(DATA+'G_fft.fits')[:,band]
-    g_ = fits.getdata(config["PSF_HS"])[:,band]  #TODO: added PSFs in CONSTANTS
+    g_ = fits.getdata(PSF_HS)[:, band]
     k, m, n = g_.shape
-    g = np.zeros((m, n), dtype=np.complex)
+    g = np.zeros((m, n), dtype=complex)
     g = g_[0]+g_[1]*1.j
     if 'adj' in mode:
         g = np.conj(g)
@@ -264,20 +259,20 @@ def get_g_band(band, mode='direct'):
 ########################### Aliasing functions ################################
 
 
-def aliasing(Z, shape3d):
-    d = config["d"]
+def aliasing(Z : np.array, shape3d : tuple, downsampling : int):
+    d = downsampling
     l, m, n = shape3d
     Z = np.reshape(Z, shape3d)
-    Z_ = np.zeros((l, m//d, n//d), dtype=np.complex)
+    Z_ = np.zeros((l, m//d, n//d), dtype=complex)
     for i in range(d):
         for j in range(d):
             Z_ += Z[:, i*m//d:(i+1)*m//d, j*n//d:(j+1)*n//d]
     return np.reshape(Z_, (l, (m//d)*(n//d)))/d
 
 
-def aliasing_adj(Z, shape3d): #  used in tools.build_b
-    d = config["d"]
-    Z_ = np.zeros(shape3d, dtype=np.complex)
+def aliasing_adj(Z, shape3d : tuple, downsampling : int): #  used in tools.build_b
+    d = downsampling
+    Z_ = np.zeros(shape3d, dtype=complex)
     M = shape3d[1]//d
     N = shape3d[2]//d
     Z = np.reshape(Z, (Z.shape[0], M, N))
