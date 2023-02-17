@@ -38,7 +38,7 @@ class Fusion(ABC):
     '''
 
     def __init__(self, cubeMultiSpectral: CubeMultiSpectral, cubeHyperSpectral: CubeHyperSpectral, Lm: np.array,
-                 PSF_MS : str, PSF_HS : str, nc: int, nr: int, mu: int = 10, **kwargs) -> None:
+                 PSF_MS : str, PSF_HS : str, nc: int, nr: int, mu: int, **kwargs) -> None:
 
         self.Y_multi = cubeMultiSpectral.Ync
         self.Y_hyper = cubeHyperSpectral.Yns
@@ -461,7 +461,6 @@ class Fusion(ABC):
 
     def postprocess(self, Zfusion: np.ndarray) -> np.array:
 
-        print("Postprocessing the product fusion : ")
         Zfusion = np.reshape(Zfusion, (self.lacp, self.nr, self.nc))
         Zfusion = np.fft.ifft2(Zfusion, norm='ortho')
         Zfusion = np.real(
@@ -470,13 +469,25 @@ class Fusion(ABC):
         return Zfusion
 
 class Weighted_Sobolev_Reg(Fusion):
-    def __init__(self, cubeMultiSpectral: CubeMultiSpectral, cubeHyperSpectral: CubeHyperSpectral,
+    """
+    :param Lh        :
+    :param outputdir :
+    :param first_run : boolean by default True. The first run computes the matrix A, B C and performs the spectral
+     reduction and stores them so that they can be loaded for the other runs, assuming that the same images are fused
+    """
+    def __init__(self, cubeMultiSpectral: CubeMultiSpectral,
+                 cubeHyperSpectral: CubeHyperSpectral,
                  Lm: np.ndarray, Lh: np.ndarray,
                  PSF_MS : str, PSF_HS : str,
-                 nc: int, nr: int, output_dir : str , first_run : bool = True) -> None:
-        super().__init__(cubeMultiSpectral, cubeHyperSpectral, Lm, PSF_MS, PSF_HS, nc, nr, mu=10)
+                 nc: int, nr: int,
+                 output_dir : str , mu: int = 10,
+                 first_run : bool = True) -> None:
+
+        super().__init__(cubeMultiSpectral, cubeHyperSpectral, Lm, PSF_MS, PSF_HS, nc, nr, mu)
         self.outputDir = output_dir
-        # Linear System
+        #***************************************************************************************************************
+        #                                               Compute Linear System
+        #***************************************************************************************************************
         if first_run is True :
 
             print("Constructing the linear system : ")
@@ -619,26 +630,33 @@ class Weighted_Sobolev_Reg(Fusion):
 
         :param save_it: by default the product fusion is not saved.
         """
-        # Linear System
         mu = self.mu
-        A = self.A
-        B = self.B
-        C = self.C
-        Z = np.reshape(                 # to be consistent with the output of Z in set_inputs of FRHOMAGE
+        A  = self.A
+        B  = self.B
+        C  = self.C
+        Z  = np.reshape(                 # to be consistent with the output of Z in set_inputs of FRHOMAGE
             self.Z,
             np.prod(self.Z.shape)
         )
-        print("Spatial Regularisation Implementation : ")
+
+        print("-------------- Spatial Regularisation Implementation : --------------")
+
         D, Wd = self.preprocess_spatial_regularisation()
-        print("Conjugate Gradient procedure : ")
+
+        print("-------------- Conjugate Gradient procedure :-------------- ")
+
         Zfusion, obj = self.conjugate_gradient(A, D, Wd, B, C, Z)
-        print("Postprocessing of the product function")
+
+        print("-------------- Postprocessing of the product function --------------")
+
         Zfusion = self.postprocess(Zfusion)
 
         if save_it is True :
 
             hdu = fits.PrimaryHDU(Zfusion)
             hdu.writeto(os.path.join(self.outputDir, f'Zfusion_{mu}.fits'), overwrite=True)
+
+        print("-------------- Fusion performed successfully ! --------------")
 
         return Zfusion, obj
 
