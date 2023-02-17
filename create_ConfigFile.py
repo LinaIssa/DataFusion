@@ -22,7 +22,7 @@ Meaning of the parameters:
 - FLUXCONV_NC     : ??
 - downsampling    : downsampling factor of the downsizing operator involved in the spatial deformation of the images (sous-échantillonnage). Should be an integer
 - lacp            : The spectral dimension of the reduced hyperspectral image as retrieved by a PCA.
-- d               : downsampling factor for the hyperspectral image
+- mu              : the regularisation strength
 ************************************************* From Constants.py *****************************************************
 *       High spatial resolution image size with padding and padding factor                                              *
 *       Example :                                                                                                       *
@@ -36,8 +36,9 @@ Meaning of the parameters:
 """
 
 from yaml import dump
+import os.path as opath
 
-DataDir = 'Input_data/simulated/'
+DataDir = '/Users/lina/Documents/MyFusion/Input/simulated_data'
 
     ###########################################
     #    Creating a dictionary of parameters  #
@@ -45,22 +46,20 @@ DataDir = 'Input_data/simulated/'
 
 data = {
     "DataDir"         : DataDir ,
-    "OutputDir"       : 'Output/NGC7469/',
-#    "WaveData"        : DataDir + 'wave.fits',     used only for data preprocessing, to discard for the fuson code
-#    "CorrelationData" : DataDir + 'h2rg_corr.fits',used only for data preprocessing, to discard for the fuson code
-    "PSF_HS"          : DataDir + 'H_fft.fits',
-    "PSF_MS"          : DataDir + 'G_fft.fits',
-    "multi_image"     : DataDir + 'NIRCam_multi.fits',
-    "hyper_image"     : DataDir + 'NIRSpec_subcube.fits',
-    "LM"              : DataDir + 'Lm.fits',
-    "LH"              : DataDir + 'Lh.fits',
+    "OutputDir"       : '/Users/lina/Documents/MyFusion/Output',
+    "PSF_HS"          : opath.join(DataDir, 'H_fft.fits'),
+    "PSF_MS"          : opath.join(DataDir, 'G_fft.fits'),
+    "multi_image"     : opath.join(DataDir, 'NIRCam_multi.fits'),
+    "hyper_image"     : opath.join(DataDir, 'NIRSpec_subcube.fits'),
+    "LM"              : opath.join(DataDir, 'Lm.fits'),
+    "LH"              : opath.join(DataDir, 'Lh.fits'),
     "nr"              : 204,
     "nc"              : 204,
     "fact_pad"        : 41,
     "FLUXCONV_NC"     : 0.031**2,
     "downsampling"    : 3 ,
     "lacp"            : 10,
-    "d"               : 3
+    "mu"              : 10
      }
 
 
