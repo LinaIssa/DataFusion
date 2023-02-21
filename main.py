@@ -8,7 +8,7 @@ except ImportError:
     from yaml import Loader, Dumper
 
 from Cube   import CubeHyperSpectral, CubeMultiSpectral
-from Fusion import Weighted_Sobolev_Reg
+from Fusion import Weighted_Sobolev_Regularisation
 from astropy.io import fits
 
 
@@ -28,6 +28,12 @@ embedded call method.
 
 By default, this main will launch the weighted sobolev regularisation.  
 
+Ref 1 : C. Guilloteau, T. Oberlin, O. Berné, É. Habart, and N. Dobigeon
+“Simulated JWST datasets for multispectral and hyperspectral image fusion”
+The Astronomical Journal, vol. 160, no. 1, p. 28, Jun. 2020.
+Ref 2 : C. Guilloteau, T. Oberlin, O. Berné, É. Habart, and N. Dobigeon
+"Hyperspectral and Multispectral Image Fusion Under Spectrally Varying Spatial Blurs – Application to High Dimensional Infrared Astronomical Imaging"
+IEEE Transactions on Computatonal Imaging, vol.6, Sept. 2020.
 """
 
 def load_config(filename):
@@ -80,6 +86,13 @@ def main(config: dict):
     Lm          = fits.getdata(SpectralDegradationFiles["Lm"])
     PSF_HS_data = fits.getdata(PSF_files["PSF_HS"])
     PSF_MS_data = fits.getdata(PSF_files["PSF_MS"])
+
+    print(f'YnirCam shape: {YnirCam.shape}')
+    print(f'YnirSpec shape: {YnirSpec.shape}')
+
+    print(f'Lm shape: {Lm.shape}')
+    print(f'Lh shape: {Lh.shape}')
+
 
     if not isinstance(YnirSpec, np.ndarray):
         raise TypeError(f'The hyperspectral image stored in {config["hyper_image"]} could not be stored in a numpy '
@@ -146,7 +159,7 @@ def main(config: dict):
     nr, nc    = config["nr"], config["nc"]
     outputDir = config["OutputDir"]
 
-    myFusion = Weighted_Sobolev_Reg(cubeMultiSpectral, cubeHyperspectral,
+    myFusion = Weighted_Sobolev_Regularisation(cubeMultiSpectral, cubeHyperspectral,
                                     Lm, Lh,
                                     PSF_MS, PSF_HS,
                                     nc, nr,

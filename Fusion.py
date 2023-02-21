@@ -1,15 +1,12 @@
 from time import time
 import os.path
-import sys
-import h5py
 import pickle
-import numpy        as np
+import numpy as np
 import scipy.sparse as sp
 
-from numpy  import matlib
-from abc    import ABC, abstractmethod
-from tools  import get_h_band, get_g_band, aliasing_adj, _centered
-from Cube   import CubeHyperSpectral, CubeMultiSpectral
+from abc import ABC, abstractmethod
+from tools import get_h_band, get_g_band, aliasing_adj, _centered
+from Cube import CubeHyperSpectral, CubeMultiSpectral
 from astropy.io import fits
 
 
@@ -38,7 +35,7 @@ class Fusion(ABC):
     '''
 
     def __init__(self, cubeMultiSpectral: CubeMultiSpectral, cubeHyperSpectral: CubeHyperSpectral, Lm: np.array,
-                 PSF_MS : str, PSF_HS : str, nc: int, nr: int, mu: int, **kwargs) -> None:
+                 PSF_MS: str, PSF_HS: str, nc: int, nr: int, mu: int, **kwargs) -> None:
 
         self.Y_multi = cubeMultiSpectral.Ync
         self.Y_hyper = cubeHyperSpectral.Yns
@@ -123,7 +120,7 @@ class Fusion(ABC):
         return
 
     @staticmethod
-    def _M(i: int,j: int, phv: np.ndarray, nr: int, nc: int):
+    def _M(i: int, j: int, phv: np.ndarray, nr: int, nc: int):
         """
         @author: Lina Issa, adapted from Claire Guilloteau's code FRHOMAGE
 
@@ -136,7 +133,7 @@ class Fusion(ABC):
         return res
 
     @staticmethod
-    def _C(i, j, V, row, col, nr, nc, d, PSF_HS : str):
+    def _C(i, j, V, row, col, nr, nc, d, PSF_HS: str):
         """
         @author Lina Issa, adapted from Claire Guilloteau's FROMHAGE
 
@@ -200,7 +197,7 @@ class Fusion(ABC):
         return Dx, Dy
 
     @staticmethod
-    def _PHV(lacp: int, Lm: np.ndarray, V, nr: int, nc: int, PSF_MS : str) -> np.array:
+    def _PHV(lacp: int, Lm: np.ndarray, V, nr: int, nc: int, PSF_MS: str) -> np.array:
         """
         @author Lina Issa, adapted from Claire Guilloteau's FROMHAGE
 
@@ -220,8 +217,8 @@ class Fusion(ABC):
             for i in range(lacp):
                 sum_h = np.zeros(nr * nc, dtype=complex)
                 for l in range(lh):
-                    PSF_spatial = get_h_band(PSF_MS, l)    # TODO PSF_image stored as a np.array in the initialisation
-                    sum_h += PSF_spatial * Lm[m, l] * V[l, i] # correction temporaire
+                    PSF_spatial = get_h_band(PSF_MS, l)  # TODO PSF_image stored as a np.array in the initialisation
+                    sum_h += PSF_spatial * Lm[m, l] * V[l, i]  # correction temporaire
                 res[m, i] = sum_h
         print(' *** PHV computation done !! ***')
         return res
@@ -307,7 +304,6 @@ class Fusion(ABC):
 
         return ans
 
-
     def preprocess_spatial_regularisation(self) -> tuple[np.ndarray, np.ndarray]:
         """
         @author Lina Issa, adapted from Claire Guilloteau's FROMHAGE
@@ -317,7 +313,7 @@ class Fusion(ABC):
         :return: D operator of finite differences
         :return: Wd the weights matrix
         """
-        V  = self.V  # the singular values matrix from the PCA decompostion performed on hyperspectral matrix
+        V = self.V  # the singular values matrix from the PCA decompostion performed on hyperspectral matrix
         Ym = self.Y_multi  # the preprocessed multi-spectral image
         Lm = self.Lm  # the spectral degradation operator on multi-spectral image
         nr, nc = self.nr, self.nc
@@ -440,7 +436,6 @@ class Fusion(ABC):
 
         print("data-driven and PSF-dependant B computed")
 
-
         return B_data
 
     def MatrixC_data(self) -> np.array:
@@ -468,27 +463,32 @@ class Fusion(ABC):
 
         return Zfusion
 
-class Weighted_Sobolev_Reg(Fusion):
+
+class Weighted_Sobolev_Regularisation(Fusion):
     """
-    :param Lh        :
-    :param outputdir :
+    This fusion class implements a Sobolev Regularisation method with weights as described in papers [1,2] and in Claire
+    Guilloteau's thesis manuscrit.
+    
+    :param Lh        : spectral degradation operator onto the hyperspectral image
+    :param outputdir : path to the output directory in which the results are stored
     :param first_run : boolean by default True. The first run computes the matrix A, B C and performs the spectral
      reduction and stores them so that they can be loaded for the other runs, assuming that the same images are fused
     """
+
     def __init__(self, cubeMultiSpectral: CubeMultiSpectral,
                  cubeHyperSpectral: CubeHyperSpectral,
                  Lm: np.ndarray, Lh: np.ndarray,
-                 PSF_MS : str, PSF_HS : str,
+                 PSF_MS: str, PSF_HS: str,
                  nc: int, nr: int,
-                 output_dir : str , mu: int = 10,
-                 first_run : bool = True) -> None:
+                 output_dir: str, mu: int = 10,
+                 first_run: bool = True) -> None:
 
         super().__init__(cubeMultiSpectral, cubeHyperSpectral, Lm, PSF_MS, PSF_HS, nc, nr, mu)
         self.outputDir = output_dir
-        #***************************************************************************************************************
+        # ***************************************************************************************************************
         #                                               Compute Linear System
-        #***************************************************************************************************************
-        if first_run is True :
+        # ***************************************************************************************************************
+        if first_run is True:
 
             print("Constructing the linear system : ")
 
@@ -503,7 +503,7 @@ class Weighted_Sobolev_Reg(Fusion):
             with open(os.path.join(output_dir, 'C.dat'), 'wb') as f:
                 pickle.dump(self.C, f)
 
-        else :
+        else:
 
             print("Loading the pre-computed linear system")
 
@@ -548,7 +548,7 @@ class Weighted_Sobolev_Reg(Fusion):
                                         )
         return Areg
 
-    def conjugate_gradient(self, A, D, Wd, B, C, Z, save_it=False) -> tuple[np.ndarray, list]:
+    def conjugate_gradient(self, A, D, Wd, B, C, Z) -> tuple[np.ndarray, list]:
         """
         :param A: the vectorized data-driven A from MatrixA_data class method.
         :param D: the operator of finite differences from the spatial regularisation preprocess method
@@ -556,7 +556,6 @@ class Weighted_Sobolev_Reg(Fusion):
         :param B: the vectorized matrix B from MatrixB_data class method
         :param C: the vectorized matrix C from MatrixB_data class method
         :param Z: the spectral-reduced hyperspectral image stored as a class attribute.
-        :param save_it: boolean, by default False
         :return: Z and obj
         """
         print('--- CONJUGATE GRADIENT ALGORITHM ---')
@@ -624,17 +623,17 @@ class Weighted_Sobolev_Reg(Fusion):
 
         return Z, obj
 
-    def __call__(self, save_it : bool = False, **kwargs) -> tuple[np.ndarray, list]:
+    def __call__(self, save_it: bool = False, **kwargs) -> tuple[np.ndarray, list]:
         """
         @author Lina Issa
 
         :param save_it: by default the product fusion is not saved.
         """
         mu = self.mu
-        A  = self.A
-        B  = self.B
-        C  = self.C
-        Z  = np.reshape(                 # to be consistent with the output of Z in set_inputs of FRHOMAGE
+        A = self.A
+        B = self.B
+        C = self.C
+        Z = np.reshape(  # to be consistent with the output of Z in set_inputs of FRHOMAGE
             self.Z,
             np.prod(self.Z.shape)
         )
@@ -651,14 +650,146 @@ class Weighted_Sobolev_Reg(Fusion):
 
         Zfusion = self.postprocess(Zfusion)
 
-        if save_it is True :
-
+        if save_it is True:
             hdu = fits.PrimaryHDU(Zfusion)
-            hdu.writeto(os.path.join(self.outputDir, f'Zfusion_{mu}.fits'), overwrite=True)
+            hdu.writeto(os.path.join(self.outputDir, f'Zfusion_SobolevWeightsReg_{mu}.fits'), overwrite=True)
 
         print("-------------- Fusion performed successfully ! --------------")
 
         return Zfusion, obj
+
+
+class Sobolev_Regularisation(Fusion):
+    """
+    This fusion class implements a simple Sobolev Regularisation method as described in papers [1,2] and in Claire
+    Guilloteau's thesis manuscrit.
+
+    :param Lh        : spectral degradation operator onto the hyperspectral image
+    :param outputdir : path to the output directory in which the results are stored
+    :param first_run : boolean by default True. The first run computes the matrix A, B C and performs the spectral
+     reduction and stores them so that they can be loaded for the other runs, assuming that the same images are fused
+    """
+    def __init__(self, cubeMultiSpectral: CubeMultiSpectral,
+                 cubeHyperSpectral: CubeHyperSpectral,
+                 Lm: np.ndarray, Lh: np.ndarray,
+                 PSF_MS: str, PSF_HS: str,
+                 nc: int, nr: int,
+                 output_dir: str, mu: int = 10,
+                 first_run: bool = True) -> None:
+
+        super().__init__(cubeMultiSpectral, cubeHyperSpectral, Lm, PSF_MS, PSF_HS, nc, nr, mu)
+        self.outputDir = output_dir
+        # ***************************************************************************************************************
+        #                                               Compute Linear System
+        # ***************************************************************************************************************
+        if first_run is True:
+
+            print("Constructing the linear system : ")
+
+            self.A = self.MatrixA_data(Lh)
+            self.B = self.MatrixB_data(Lh)
+            self.C = self.MatrixC_data()
+
+            with open(os.path.join(output_dir, 'A.dat'), 'wb') as f:
+                pickle.dump(self.A, f)
+            with open(os.path.join(output_dir, 'B.dat'), 'wb') as f:
+                pickle.dump(self.B, f)
+            with open(os.path.join(output_dir, 'C.dat'), 'wb') as f:
+                pickle.dump(self.C, f)
+
+        else:
+
+            print("Loading the pre-computed linear system")
+
+            with open(os.path.join(output_dir, 'A.dat'), 'rb') as f:
+                self.A = pickle.load(f)
+            with open(os.path.join(output_dir, 'B.dat'), 'rb') as f:
+                self.B = pickle.load(f)
+            with open(os.path.join(output_dir, 'C.dat'), 'rb') as f:
+                self.C = pickle.load(f)
+
+    def __call__(self, save_it: bool = False, **kwargs) -> tuple[np.ndarray, list]:
+        """
+        @author Lina Issa
+
+        :param save_it: by default the product fusion is not saved.
+        """
+        mu = self.mu
+        A = self.A
+        B = self.B
+        C = self.C
+        Z = np.reshape(
+            self.Z,
+            np.prod(self.Z.shape)
+        )
+
+        print("-------------- Conjugate Gradient procedure :-------------- ")
+
+        Zfusion, obj = self.conjugate_gradient(A, B, C, Z)
+
+        print("-------------- Postprocessing of the product function --------------")
+
+        Zfusion = self.postprocess(Zfusion)
+
+        if save_it is True:
+            hdu = fits.PrimaryHDU(Zfusion)
+            hdu.writeto(os.path.join(self.outputDir, f'Zfusion_SobolevReg_{mu}.fits'), overwrite=True)
+
+        print("-------------- Fusion performed successfully ! --------------")
+
+        return Zfusion, obj
+
+    def spatial_regularisation(self, *args, **kwargs):
+        pass
+
+    def conjugate_gradient(self, A, B, C, Z, save_it=False) -> tuple[np.ndarray, list]:
+        """
+        :param A: the vectorized data-driven A from MatrixA_data class method.
+        :param B: the vectorized matrix B from MatrixB_data class method
+        :param C: the vectorized matrix C from MatrixB_data class method
+        :param Z: the spectral-reduced hyperspectral image stored as a class attribute.
+        :param save_it: boolean, by default False
+        :return: Z and obj
+        """
+        #### Conjugate gradient iterations #
+        print('--- CONJUGATE GRADIENT ALGORITHM ---')
+        t1 = time()
+        nb_it = 0
+        z0 = Z.copy()
+        # Initialize
+
+        ########## Control procedure ##########
+        # print('NANs in Az, b and A_reg z : '+str(np.sum(np.isnan(A.dot(z))))+' ; '+str(np.sum(np.isnan(b)))+' ; '+str(np.sum(np.isnan(compute_Areg(lacp, mu1, D, Wd, z)))))
+        #######################################
+
+        r = A.dot(Z) + B
+        p = -r.copy()
+        # Objective function
+        obj = [0.5 * np.dot(np.conj(Z).T, A.dot(Z)) + np.dot(np.conj(B.T), Z) + C]
+        print(str(nb_it) + ' -- Objective function value : ' + str(obj[nb_it]))
+
+        # Stopping criterion
+        stop = obj[nb_it]
+        # Iterations
+        while stop > 1e-4 and nb_it < 200:
+
+            alpha = np.dot(np.conj(r).T, r) / (np.dot(np.conj(p).T, A.dot(p)))
+            Z = Z + alpha * p
+            r_old = r.copy()
+            r = r + alpha * (A.dot(p))
+            beta = np.dot(np.conj(r).T, r) / np.dot(np.conj(r_old).T, r_old)
+            p = -r + beta * p
+            nb_it += 1
+            obj.append(0.5 * np.dot(np.conj(Z).T, A.dot(Z)) + np.dot(np.conj(B.T), Z) + C)
+            print(str(nb_it) + ' -- Objective function value : ' + str(obj[nb_it]))
+            stop = (obj[-2] - obj[-1]) / obj[-2]
+
+        t2 = time()
+
+        print('Cg Computation time : ' + str(np.round((t2 - t1) / 60)) + 'min ' + str(np.round((t2 - t1) % 60)) + 's.')
+
+        return Z, obj
+
 
     # def __call__(self, regP =[], regKw = {},
     #                   gradP=[], gradKw= {}) -> np.array:
