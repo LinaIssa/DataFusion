@@ -7,7 +7,7 @@
 This fusion algorithm provides tools to perform data fusion for astronomical images in the context of JWST new data releases. 
 More specifically it combines hyperspectral image from NirSpec with the multispectral image from NirCam instrument to produce a new image both spatially and spectrally resolved.
 This algorithm is largery inspired by the fusion code developed by [Claire Guilloteau](https://github.com/cguilloteau/Fast-fusion-of-astronomical-images). 
-The details og the fusion procedure can be found in [[1]](https://arxiv.org/abs/1912.11868) and in [[2]](https://ui.adsabs.harvard.edu/abs/2020AJ....160...28G/abstract).
+The details of the fusion procedure can be found in [[1]](https://arxiv.org/abs/1912.11868) and in [[2]](https://ui.adsabs.harvard.edu/abs/2020AJ....160...28G/abstract).
 
 In the repository you will find : 
 - `main.py` : launch the fusion algorithm 
