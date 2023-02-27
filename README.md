@@ -14,7 +14,7 @@ In the repository you will find :
 - `Cube.py` : pre-process the data images before the fusion 
 - `Fusion.py` : gather the regularisation-dependant methods of fusion 
 - `tools.py`  : inventory of small help functions. Imported in `Fusion.py` and `Cube.py` modules
-- `create_ConfigFile.py` : to create the config.yaml, a yaml configuration file with all the parameters. 
+- `create_ConfigFile.py` : create the config.yaml, a yaml configuration file with all the parameters. 
 
 
 ## How to use  
