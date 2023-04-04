@@ -6,7 +6,7 @@ try:
     from yaml import CLoader as Loader, CDumper as Dumper
 except ImportError:
     from yaml import Loader, Dumper
-
+from tools import cropping_Lm
 from Cube   import CubeHyperSpectral, CubeMultiSpectral
 from Fusion import Weighted_Sobolev_Regularisation
 from astropy.io import fits
@@ -32,29 +32,55 @@ Ref 1 : C. Guilloteau, T. Oberlin, O. Berné, É. Habart, and N. Dobigeon
 “Simulated JWST datasets for multispectral and hyperspectral image fusion”
 The Astronomical Journal, vol. 160, no. 1, p. 28, Jun. 2020.
 Ref 2 : C. Guilloteau, T. Oberlin, O. Berné, É. Habart, and N. Dobigeon
-"Hyperspectral and Multispectral Image Fusion Under Spectrally Varying Spatial Blurs – Application to High Dimensional Infrared Astronomical Imaging"
+"Hyperspectral and Multispectral Image Fusion Under Spectrally Varying Spatial Blurs – Application to High Dimensional 
+Infrared Astronomical Imaging"
 IEEE Transactions on Computatonal Imaging, vol.6, Sept. 2020.
+
+
 """
 
-def load_config(filename):
+def load_config(filename, type : str = 'fusion' ):
     """
     Importing the yaml configuration file and returns it as a python dictionary.
     :param filename : The filename of the configuration file
+
+    In observation_config.yaml we gather all the parameters related to the context of acquisition of the images.
+    In fusion_config.yaml, we store paths to data and all parameters that dictate the fusion algorithm.
     :return: a python dictionary containing all the important parameter for the fusion code.
+
     """
+
     with open(filename) as f:
         stream = f.read()
     config = load(stream, Loader=Loader)
-    params = {"DataDir": str, "OutputDir": str, "PSF_HS": str, "PSF_MS": str, "multi_image": str, "hyper_image": str,
-              "LM": str, "LH": str, "nr": int, "nc": int, "fact_pad": int, "FLUXCONV_NC": float, "downsampling": int,
-              "lacp": int  # , "WaveData": str, "CorrelationData": str,
+
+    if type == 'fusion':
+
+        params = {"OutputDir": str, "PSF_HS": str, "PSF_MS": str, "multi_image": str, "hyper_image": str,
+              "LM": str, "LH": str,
+              "lacp": int, 'NIRCam_Filters' : list, 'Spectral_Scope' : list
               }
+
+    elif type == 'observation':
+
+        params = {'FLUXCONV_NC' : float, 'exp_time' : float, 'ConvConst' : int
+               }
+
+    else :
+
+        raise ValueError(f'You provided {type} as type while it should have been either fusion or observation ')
+
+
     for va in params.keys():
+
         if va not in config.keys():
             raise IndexError(f"{va} is missing in the configuration file")
+
         typ = params[va]
+
         if not isinstance(config[va], typ):  # noqa
             raise TypeError(f"{va} given in the configuration file as {type(config[va])} but it should be {params[va]}")
+
     return config
 
 
@@ -71,6 +97,8 @@ def main(config: dict):
     #                                               Data Loading & Preprocessing                                       #
     ####################################################################################################################
 
+    # ----------- Retrieving Datafiles
+
     datafiles                = {"hyper_image": config["hyper_image"],
                                 "multi_image": config["multi_image"]}
 
@@ -79,6 +107,9 @@ def main(config: dict):
 
     PSF_files                = {"PSF_HS" : config["PSF_HS"],
                                 "PSF_MS" : config["PSF_MS"]}
+
+    PSF_HS = PSF_files["PSF_HS"] # path to PSF_HS file
+    PSF_MS = PSF_files["PSF_MS"] # path to PSF_MS file
 
     YnirSpec    = fits.getdata(datafiles["hyper_image"])
     YnirCam     = fits.getdata(datafiles["multi_image"])
@@ -102,50 +133,52 @@ def main(config: dict):
         raise TypeError(f'The multi-spectral image stored in {config["multi_image"]} could not be stored in a numpy '
                         f'array')
 
-    if not Lm.shape[1] == Lh.shape[0] :
-        raise TypeError(f'The given spectral operators  do not have matching size. The number of bands in the operator '
-                        f'for the hyperspectral image ({Lh.shape[0]}) does not match that of the multi-spectral image '
-                        f'({Lm.shape[1]}).')
+    if Lm.shape[0] >= Lh.shape[0] :
+        raise TypeError(f' Lm operator has more bands (lm = {Lm.shape[0]}) than Lh (lh = {Lh.shape[0]})')
 
-    if not Lm.shape[0] == YnirCam.shape[0] or Lh.shape[0] == YnirSpec.shape[0]:
+    if not Lm.shape[1] == Lh.shape[0] :
+
+        if Lm.shape[1] > Lh.shape[0] :
+            Lm = cropping_Lm(Lm, (Lm.shape[0], Lh.shape[0]))
+        else :
+            raise ValueError(f'You should build Lh with a number of bands at most equal to the total number of filters '
+                             f'in Lm.fits {Lm.shape[1]} ')
+
+    if Lm.shape[0] != YnirCam.shape[0] or Lh.shape[0] != YnirSpec.shape[0]:
         raise TypeError(f'Either the number of bands in the multi-spectral image ({YnirCam.shape[0]}) does not '
                         f'correspond to that in the associated operator Lm ({Lm.shape[0]}) or the number of bands in'
                         f' the hyperspectral image ({YnirSpec.shape[0]}) is not in adequacy with that in the '
                         f'corresponding operator Lh ({Lh.shape[0]}).')
 
+    # ----------- Retrieving Parameters from the config file
 
+    mu       = config['mu']
+    lacp     = config["lacp"]
+    fluxConv = config["FLUXCONV_NC"]
 
+    # ----------- Defining some factors from the retrieved data
 
-    l_h, pix1_h, pix2_h = YnirSpec.shape
-    l_m, pix1_m, pix2_m = YnirCam.shape
+    nr, nc       = PSF_HS_data.shape[2], PSF_HS_data.shape[3]
+    fact_pad     = (nr - (YnirCam.shape[-2]+2))/2
+    downsampling = YnirCam.shape[-1]/YnirSpec.shape[-1]
 
-    lacp         = config["lacp"]
-    fact_pad     = config["fact_pad"]
-    downsampling = config["downsampling"] # sous echantillonage
-    fluxConv     = config["FLUXCONV_NC"]
+    if not isinstance(downsampling, int):
+        downsampling = int(downsampling)
 
-    PSF_HS = PSF_files["PSF_HS"] # path to PSF_HS file
-    PSF_MS = PSF_files["PSF_MS"] # path to PSF_MS file
+    if not isinstance(fact_pad, int):
+        fact_pad = int(fact_pad)
 
-
-
-    #if not PSF_HS_data.shape[2] == PSF_HS_data.shape[3] and PSF_MS_data.shape[2] == PSF_MS_data.shape[3]:
-    #    raise TypeError(f' The given PSF a ')
-    #if not PSF_HS_data.shape[2] == PSF_MS_data.shape[2]:
-    #    raise TypeError
-
-    if not config["nr"] * config["nc"] == PSF_MS_data.shape[2] * PSF_MS_data.shape[3]:
+    if not nr * nc == PSF_MS_data.shape[2] * PSF_MS_data.shape[3]:
         raise ValueError(f'There is a discrepancy between the value of (nr, nc) and that of the spatial dimensions of '
                          f'the PSF that is {PSF_MS_data.shape[2]} x {PSF_MS_data.shape[3]}')
 
 
+    # -------- Datacubes preprocessing
     cubeHyperspectral = CubeHyperSpectral(YnirSpec, YnirCam,
                                           fact_pad,  downsampling,
                                           fluxConv, PSF_HS, lacp)
 
     cubeHyperspectral(Lh)
-
-    #np.savez(config["OutputDir"] + 'Z.npz', format=type(cubeHyperspectral.Z), data=cubeHyperspectral.Z)
 
     cubeMultiSpectral = CubeMultiSpectral(YnirCam, fact_pad, PSF_MS)
 
@@ -155,8 +188,6 @@ def main(config: dict):
     #                                                       Data Fusion                                                #
     ####################################################################################################################
 
-    mu        = config['mu']
-    nr, nc    = config["nr"], config["nc"]
     outputDir = config["OutputDir"]
 
     myFusion = Weighted_Sobolev_Regularisation(cubeMultiSpectral, cubeHyperspectral,
@@ -166,22 +197,8 @@ def main(config: dict):
                                     outputDir,
                                     mu, first_run=False)
 
-    myFusion(save_it=False)
+    myFusion(save_it=True)
 
-
-"""
-    if first_run == False :
-        answer = input("Are you using exactly the same images and the same PSFs of NirCam and NirSpec instruments as "
-                       "for the first run? Answer YES or NO")
-        if answer == "YES" :
-            print("Great !")
-            # TODO write the fusion call with A, B and C being loaded instead of computed
-
-        if answer == "NO" :
-            print("Then you should set first_run as True")
-        else:
-            print('The answer should be YES or NO')
-"""
 
 if __name__ == "__main__":
     config = load_config('config.yaml')
