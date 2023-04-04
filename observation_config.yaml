@@ -1,0 +1,3 @@
+FLUXCONV_NC: 0.0009609999999999999 # a conversion parameter to convert the number of electrons into a physical unit (to be updated)
+exp_time   : 128.841               # exposure time in seconds for NIRSpec
+ConvConst  : 205000                # Conversion constant
