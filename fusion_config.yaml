@@ -1,11 +1,4 @@
-OutputDir: Output/simulated_data/
-hyper_image: Input/production_simulated_data/Yh_highsnr_d33_lm11.fits
-multi_image: Input/production_simulated_data/Ym_highsnr_d33_lm11.fits
-LH: Input/simulated_data/Lh.fits
-LM: Input/simulated_data/Lm.fits
-PSF_HS: Input/simulated_data/H_fft.fits
-PSF_MS: Input/simulated_data/G_fft.fits
+OutputDir: Output/Data_1/
 lacp: 10
 mu: 100
-NIRCam_Filters : ['f115w', 'f140m', 'f150w', 'f150w2', 'f162m', 'f164n', 'f182m', 'f187n', 'f200w', 'f210m', 'f212n']
 Spectral_Scope : []

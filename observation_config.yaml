@@ -1,3 +1,11 @@
+InputDir   : Input/Data_1/
+hyper_image: Input/Data_1/NIRSpec_cube.fits
+multi_image: Input/Data_1/NIRCam_cube.fits
+TableWave  : Input/Data_1/tabwave.fits
+PSF_HS     : Input/Data_1/H_fft.fits
+PSF_MS     : Input/Data_1/G_fft.fits
+NIRCam_Filters  : ['f115w', 'f140m', 'f150w', 'f150w2', 'f162m', 'f164n', 'f182m', 'f187n', 'f200w', 'f210m', 'f212n']
+NIRSpec_Filters : 'f100lp'
 FLUXCONV_NC: 0.0009609999999999999 # a conversion parameter to convert the number of electrons into a physical unit (to be updated)
 exp_time   : 128.841               # exposure time in seconds for NIRSpec
 ConvConst  : 205000                # Conversion constant
