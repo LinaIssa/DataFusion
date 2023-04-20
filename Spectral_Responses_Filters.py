@@ -1,8 +1,14 @@
 import numpy as np
+import os.path as opath
 from main       import load_config
 from astropy.io import fits
 from pandeia.engine.instrument_factory import InstrumentFactory
-
+from yaml import load, safe_dump
+from yaml import load
+try:
+    from yaml import CLoader as Loader, CDumper as Dumper
+except ImportError:
+    from yaml import Loader, Dumper
 '''
 @author: Lina Issa, adapted from Claire Guilloteau's FRHOMAGE algorithm.
 
@@ -25,6 +31,8 @@ def get_NIRCam_filters(filters_list : list, spectral_resampling : np.array, inst
     FLUXCONV_NC = instrument_config['FLUXCONV_NC']
     exp_time    = instrument_config['exp_time']
     cste_conv   = instrument_config['ConvConst']
+
+    spectral_resampling = np.reshape(spectral_resampling, (spectral_resampling.shape[0]))
 
     short_wave_list = ['f115w', 'f140m', 'f150w', 'f150w2', 'f162m', 'f164n', 'f182m', 'f187n', 'f200w', 'f210m',
                        'f212n']
@@ -133,26 +141,23 @@ def get_pce(mode : str, config : dict, wave_resampling : np.array):
 # ----------------------------------------------------------------------------------------------------------------------
 #                                          MAIN
 #----------------------------------------------------------------------------------------------------------------------
-def main(fusion_config : dict, instrument_config : dict) :
+def main(observation_config : dict) :
 
-    NIRSpecData       = fits.getdata(fusion_config['hyper_image'])
-    tablewave         = fits.getdata(fusion_config['TableWave'])
-    spectral_sampling = np.sort(NIRSpecData[:,0,0])
-    spectral_scope    = fusion_config['Spectral_Scope']
-    NIRCam_Filters    = fusion_config['NIRCam_Filters']
-    NIRSpec_Filters   = fusion_config['NIRSpec_Filters']
+    DataDir         = observation_config["InputDir"]
+    NIRCam_Filters  = observation_config['NIRCam_Filters']
+    NIRSpec_Filters = observation_config['NIRSpec_Filters']
+    tablewave       = fits.getdata(observation_config['TableWave'])
+    #if not isinstance(spectral_scope, list):
+    #    raise TypeError(f'The spectral scope provided is {type(spectral_scope)} while it should be a list')
 
-    if not isinstance(spectral_scope, list):
-        raise TypeError(f'The spectral scope provided is {type(spectral_scope)} while it should be a list')
-
-    if spectral_scope != [] :
-        wave1, wave2 = spectral_scope[0], spectral_scope[1]
-        if wave1 < spectral_sampling[1] and wave2 > spectral_sampling[1]:
-            a, b = np.where(spectral_sampling>wave1)[0][0], np.where(spectral_sampling<wave2[0][-1])
-            spectral_sampling = spectral_sampling[a:b]
+    #if spectral_scope != [] :
+    #    wave1, wave2 = spectral_scope[0], spectral_scope[1]
+    #    if wave1 < spectral_sampling[1] and wave2 > spectral_sampling[1]:
+    #        a, b = np.where(spectral_sampling>wave1)[0][0], np.where(spectral_sampling<wave2[0][-1])
+    #        spectral_sampling = spectral_sampling[a:b]
 
 
-    Lm_pce  = get_NIRCam_filters(NIRCam_Filters, spectral_sampling, instrument_config)
+    Lm_pce  = get_NIRCam_filters(NIRCam_Filters, tablewave, observation_config)
     Lh_pce  = get_NIRSpec_filters(NIRSpec_Filters,tablewave)
 
     Lh      = np.diag(
@@ -164,17 +169,26 @@ def main(fusion_config : dict, instrument_config : dict) :
 
 
     hdu = fits.PrimaryHDU(Lm_pce)
-    hdu.writeto("NirCam_SpectralResponse.fits", overwrite=True)
+    hdu.writeto(opath.join(DataDir, "NirCam_SpectralResponse.fits"), overwrite=True)
 
     hdu = fits.PrimaryHDU(Lh)
-    hdu.writeto(f'NirSpec_Throughput_{NIRSpec_Filters}.fits', overwrite=True)
+    hdu.writeto(opath.join(DataDir, f'NirSpec_Throughput_{NIRSpec_Filters}.fits'), overwrite=True)
 
+    SpectralTransmissionFiles = {'NIRCam_SpectralResponses'  : opath.join(DataDir, 'NirCam_SpectralResponse.fits'),
+                                 'NIRSpec_SpectralResponses' : opath.join(DataDir, f'NirSpec_Throughput_{NIRSpec_Filters}.fits')
+                                 }
+
+    with open('observation_config.yaml', 'r') as yamlfile:
+        stream = load(yamlfile,  Loader=Loader)
+        stream.update(SpectralTransmissionFiles)
+
+    with open('observation_config.yaml', 'w') as yamlfile:
+        safe_dump(stream, yamlfile)  # Also note the safe_dump
 # ----------------------------------------------------------------------------------------------------------------------
 #                                           Parameters loading
 #----------------------------------------------------------------------------------------------------------------------
 
-fusion_config     = load_config('fusion_config.yaml')
-instrument_config = load_config('observation_config.yaml', type = 'observation')
+observation_config = load_config('observation_config.yaml', type = 'observation')
 
-main(fusion_config, instrument_config)
+main(observation_config)
 
