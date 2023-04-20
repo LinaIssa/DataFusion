@@ -6,6 +6,7 @@ try:
     from yaml import CLoader as Loader, CDumper as Dumper
 except ImportError:
     from yaml import Loader, Dumper
+
 from tools import cropping_Lm
 from Cube   import CubeHyperSpectral, CubeMultiSpectral
 from Fusion import Weighted_Sobolev_Regularisation
@@ -36,7 +37,6 @@ Ref 2 : C. Guilloteau, T. Oberlin, O. Berné, É. Habart, and N. Dobigeon
 Infrared Astronomical Imaging"
 IEEE Transactions on Computatonal Imaging, vol.6, Sept. 2020.
 
-
 """
 
 def load_config(filename, type : str = 'fusion' ):
@@ -56,15 +56,18 @@ def load_config(filename, type : str = 'fusion' ):
 
     if type == 'fusion':
 
-        params = {"OutputDir": str, "PSF_HS": str, "PSF_MS": str, "multi_image": str, "hyper_image": str,
-              "LM": str, "LH": str,
-              "lacp": int, 'NIRCam_Filters' : list, 'Spectral_Scope' : list
-              }
+        params = {"OutputDir" : str, "lacp": int, "mu" : int,'Spectral_Scope': list
+                  }
 
     elif type == 'observation':
 
-        params = {'FLUXCONV_NC' : float, 'exp_time' : float, 'ConvConst' : int
-               }
+        params = {"InputDir": str,
+                  "multi_image": str, "hyper_image": str,
+                  'TableWave' : str,
+                  "PSF_HS": str, "PSF_MS": str,
+                  'NIRCam_Filters' : list, 'NIRSpec_Filters' : str,
+                  'FLUXCONV_NC' : float, 'exp_time' : float, 'ConvConst' : int
+                  }
 
     else :
 
