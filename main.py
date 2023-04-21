@@ -41,6 +41,7 @@ IEEE Transactions on Computatonal Imaging, vol.6, Sept. 2020.
 
 def load_config(filename, type : str = 'fusion' ):
     """
+
     Importing the yaml configuration file and returns it as a python dictionary.
     :param filename : The filename of the configuration file
 
@@ -66,7 +67,9 @@ def load_config(filename, type : str = 'fusion' ):
                   'TableWave' : str,
                   "PSF_HS": str, "PSF_MS": str,
                   'NIRCam_Filters' : list, 'NIRSpec_Filters' : str,
-                  'FLUXCONV_NC' : float, 'exp_time' : float, 'ConvConst' : int
+                  'FLUXCONV_NC' : float, 'exp_time' : float, 'ConvConst' : int,
+                  'NIRCam_SpectralResponses'  : str,
+                  'NIRSpec_SpectralResponses' : str
                   }
 
     else :
@@ -87,12 +90,15 @@ def load_config(filename, type : str = 'fusion' ):
     return config
 
 
-def main(config: dict):
+def main(observation_config: dict, fusion_conf: dict):
     """
-    :param config : the parameter dictionary loaded automatically by running main.py
+    :param obsercation_conf : the parameter dictionary related to the context of the observation and loaded automatically
+     by running main.py
+    :param fusion_conf      : the parameter dictionary that control the fusion algorithm
 
     :return Zfusion : the fusion product
     :return obj :  the objective function
+
     """
     print('Launching Fusion with Regularization Of Hyper and Multi-spectral imAGEs')
 
@@ -102,22 +108,25 @@ def main(config: dict):
 
     # ----------- Retrieving Datafiles
 
-    datafiles                = {"hyper_image": config["hyper_image"],
-                                "multi_image": config["multi_image"]}
+    datafiles                = {"hyper_image": observation_config["hyper_image"],
+                                "multi_image": observation_config["multi_image"]}
 
-    SpectralDegradationFiles = {"Lh" : config["LH"],
-                                "Lm" : config["LM"]}
+    SpectralDegradationFiles = {"NIRSpec" : observation_config["NIRSpec_SpectralResponses"],
+                                "NIRCam"  : observation_config["NIRCam_SpectralResponses"]}
 
-    PSF_files                = {"PSF_HS" : config["PSF_HS"],
-                                "PSF_MS" : config["PSF_MS"]}
+    PSF_files                = {"PSF_HS" : observation_config["PSF_HS"],
+                                "PSF_MS" : observation_config["PSF_MS"]}
 
     PSF_HS = PSF_files["PSF_HS"] # path to PSF_HS file
     PSF_MS = PSF_files["PSF_MS"] # path to PSF_MS file
 
+    spectral_scope = fusion_conf["Spectral_Scope"]
+
+    tablewave   = fits.getdata(observation_config["TableWave"])
     YnirSpec    = fits.getdata(datafiles["hyper_image"])
     YnirCam     = fits.getdata(datafiles["multi_image"])
-    Lh          = fits.getdata(SpectralDegradationFiles["Lh"])
-    Lm          = fits.getdata(SpectralDegradationFiles["Lm"])
+    Lh          = fits.getdata(SpectralDegradationFiles["NIRSpec"])
+    Lm          = fits.getdata(SpectralDegradationFiles["NIRCam"])
     PSF_HS_data = fits.getdata(PSF_files["PSF_HS"])
     PSF_MS_data = fits.getdata(PSF_files["PSF_MS"])
 
@@ -129,11 +138,11 @@ def main(config: dict):
 
 
     if not isinstance(YnirSpec, np.ndarray):
-        raise TypeError(f'The hyperspectral image stored in {config["hyper_image"]} could not be stored in a numpy '
+        raise TypeError(f'The hyperspectral image stored in {observation_config["hyper_image"]} could not be stored in a numpy '
                         f'array')
 
     if not isinstance(YnirCam, np.ndarray):
-        raise TypeError(f'The multi-spectral image stored in {config["multi_image"]} could not be stored in a numpy '
+        raise TypeError(f'The multi-spectral image stored in {observation_config["multi_image"]} could not be stored in a numpy '
                         f'array')
 
     if Lm.shape[0] >= Lh.shape[0] :
@@ -141,11 +150,8 @@ def main(config: dict):
 
     if not Lm.shape[1] == Lh.shape[0] :
 
-        if Lm.shape[1] > Lh.shape[0] :
-            Lm = cropping_Lm(Lm, (Lm.shape[0], Lh.shape[0]))
-        else :
-            raise ValueError(f'You should build Lh with a number of bands at most equal to the total number of filters '
-                             f'in Lm.fits {Lm.shape[1]} ')
+        raise ValueError(f'You should interpolate Lm into the spectrzl resolution of the hyperspectral image '
+                         f' that is {Lh.shape[1]} ')
 
     if Lm.shape[0] != YnirCam.shape[0] or Lh.shape[0] != YnirSpec.shape[0]:
         raise TypeError(f'Either the number of bands in the multi-spectral image ({YnirCam.shape[0]}) does not '
@@ -153,13 +159,20 @@ def main(config: dict):
                         f' the hyperspectral image ({YnirSpec.shape[0]}) is not in adequacy with that in the '
                         f'corresponding operator Lh ({Lh.shape[0]}).')
 
-    # ----------- Retrieving Parameters from the config file
+    # ----------- Constructing the spectral operators  --------------------------------
+     #if spectral_scope != [] : #TODO: How to transform data to take into account the spectral range
+     #   wave1, wave2 = spectral_scope[0], spectral_scope[1]
+     #   if wave1 < tablewave[1] and wave2 > tablewave[1]:
+     #       a, b = np.where(tablewave>wave1)[0][0], np.where(tablewave<wave2[0][-1])
+     #       spectral_window = tablewave[a:b]
 
-    mu       = config['mu']
-    lacp     = config["lacp"]
-    fluxConv = config["FLUXCONV_NC"]
+    # ----------- Retrieving Parameters from the config file --------------------------------
 
-    # ----------- Defining some factors from the retrieved data
+    mu       = fusion_conf['mu']
+    lacp     = fusion_conf["lacp"]
+    fluxConv = observation_config["FLUXCONV_NC"]
+
+    # ----------- Defining some factors from the retrieved data --------------------------------
 
     nr, nc       = PSF_HS_data.shape[2], PSF_HS_data.shape[3]
     fact_pad     = (nr - (YnirCam.shape[-2]+2))/2
@@ -176,7 +189,7 @@ def main(config: dict):
                          f'the PSF that is {PSF_MS_data.shape[2]} x {PSF_MS_data.shape[3]}')
 
 
-    # -------- Datacubes preprocessing
+    # ---------------- Datacubes preprocessing  ----------------
     cubeHyperspectral = CubeHyperSpectral(YnirSpec, YnirCam,
                                           fact_pad,  downsampling,
                                           fluxConv, PSF_HS, lacp)
@@ -191,18 +204,21 @@ def main(config: dict):
     #                                                       Data Fusion                                                #
     ####################################################################################################################
 
-    outputDir = config["OutputDir"]
+    outputDir = fusion_conf["OutputDir"]
+    outputFile = fusion_conf['OutputFileName']
 
     myFusion = Weighted_Sobolev_Regularisation(cubeMultiSpectral, cubeHyperspectral,
                                     Lm, Lh,
                                     PSF_MS, PSF_HS,
                                     nc, nr,
-                                    outputDir,
+                                    outputDir, outputFile,
                                     mu, first_run=False)
 
     myFusion(save_it=True)
 
 
 if __name__ == "__main__":
-    config = load_config('config.yaml')
-    image = main(config)
+    fusion_config = load_config('fusion_config.yaml')
+    obs_config = load_config('observation_config.yaml', type='observation')
+
+    image = main(obs_config, fusion_config)
