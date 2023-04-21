@@ -1,4 +1,6 @@
-OutputDir: Output/Data_1/
+OutputDir: /Users/lina/Documents/MyFusion/Output
+OutputFileName: Zfusion_SobolevReg
+Regularisation_Method: SobolevReg
+Spectral_Scope: []
 lacp: 10
 mu: 100
-Spectral_Scope : []
