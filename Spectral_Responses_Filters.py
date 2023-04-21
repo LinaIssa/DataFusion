@@ -4,7 +4,7 @@ from main       import load_config
 from astropy.io import fits
 from pandeia.engine.instrument_factory import InstrumentFactory
 from yaml import load, safe_dump
-from yaml import load
+from yaml import load,dump
 try:
     from yaml import CLoader as Loader, CDumper as Dumper
 except ImportError:
@@ -146,16 +146,13 @@ def main(observation_config : dict) :
     DataDir         = observation_config["InputDir"]
     NIRCam_Filters  = observation_config['NIRCam_Filters']
     NIRSpec_Filters = observation_config['NIRSpec_Filters']
-    tablewave       = fits.getdata(observation_config['TableWave'])
+    hyper_image     = observation_config['hyper_image']
+
+    hdul      = fits.open(hyper_image)
+    tablewave = np.linspace(hdul[1].header['WAVSTART'], hdul[1].header['WAVEND'], hdul[1].header['NAXIS3'])
+
     #if not isinstance(spectral_scope, list):
     #    raise TypeError(f'The spectral scope provided is {type(spectral_scope)} while it should be a list')
-
-    #if spectral_scope != [] :
-    #    wave1, wave2 = spectral_scope[0], spectral_scope[1]
-    #    if wave1 < spectral_sampling[1] and wave2 > spectral_sampling[1]:
-    #        a, b = np.where(spectral_sampling>wave1)[0][0], np.where(spectral_sampling<wave2[0][-1])
-    #        spectral_sampling = spectral_sampling[a:b]
-
 
     Lm_pce  = get_NIRCam_filters(NIRCam_Filters, tablewave, observation_config)
     Lh_pce  = get_NIRSpec_filters(NIRSpec_Filters,tablewave)
@@ -174,16 +171,20 @@ def main(observation_config : dict) :
     hdu = fits.PrimaryHDU(Lh)
     hdu.writeto(opath.join(DataDir, f'NirSpec_Throughput_{NIRSpec_Filters}.fits'), overwrite=True)
 
+    hdu = fits.PrimaryHDU(tablewave)
+    hdu.writeto(opath.join(DataDir, f'tablewave_{len(tablewave)}.fits'), overwrite=True)
+
     SpectralTransmissionFiles = {'NIRCam_SpectralResponses'  : opath.join(DataDir, 'NirCam_SpectralResponse.fits'),
-                                 'NIRSpec_SpectralResponses' : opath.join(DataDir, f'NirSpec_Throughput_{NIRSpec_Filters}.fits')
+                                 'NIRSpec_SpectralResponses' : opath.join(DataDir, f'NirSpec_Throughput_{NIRSpec_Filters}.fits'),
+                                 'TableWave' : opath.join(DataDir, f'NirSpec_Throughput_{NIRSpec_Filters}.fits')
                                  }
 
     with open('observation_config.yaml', 'r') as yamlfile:
         stream = load(yamlfile,  Loader=Loader)
         stream.update(SpectralTransmissionFiles)
 
-    with open('observation_config.yaml', 'w') as yamlfile:
-        safe_dump(stream, yamlfile)  # Also note the safe_dump
+    with open('observation_config.yaml', 'w+') as yamlfile:
+        yamlfile.write(dump(stream))
 # ----------------------------------------------------------------------------------------------------------------------
 #                                           Parameters loading
 #----------------------------------------------------------------------------------------------------------------------
